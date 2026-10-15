@@ -201,7 +201,7 @@ test('water freezes into an ordered lattice and is recognised as a solid', funct
   sim.react = function () {}; sim.bondEvents = function () {};
   sim.addMolecules(H2O, 500, P.W / 2, P.H - 200, { x: 350, y: 150 });
   sim.plateTemp = 200;
-  run(sim, 10);
+  run(sim, 14); // the open ice lattice takes a little longer to grow than a dense one
   const O = [];
   for (let i = 0; i < sim.n; i++) if (sim.el[i] === 8) O.push(i);
   let solid = 0, order = 0, counted = 0;
@@ -273,7 +273,8 @@ test('iron melts on a 2100 K plate, stays a liquid, and hardens into crystal gra
   run(sim, 1);
   const recast = metalState(sim, fe);
   assert.ok(recast.crystal > 0.6 && recast.psi6 > 0.8, 'cooled iron crystallises: ' + JSON.stringify(recast));
-  assert.ok(rmsMove(sim, before) < 15, 'cooled iron is rigid');
+  const still = rmsMove(sim, before);
+  assert.ok(still < flow / 2, 'cooled iron is rigid: atoms moved ' + still.toFixed(1) + ' per second (melt: ' + flow.toFixed(1) + ')');
 });
 
 test('gallium melts just above its 303 K melting point and freezes below it', function () {

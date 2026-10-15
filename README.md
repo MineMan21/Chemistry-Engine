@@ -130,7 +130,7 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   by a best-fit rotation and shift (shape matching), and gentle conservative spring forces pull
   members toward their sites. Every join, leave and spring is energy-accounted, and members
   melt off again when heated past the melting point. Ice grains are spaced so that ice takes up
-  about 9% more room than the liquid, as real ice does.
+  about 7% more room than the liquid (real ice: 9%), so water swells as it freezes.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
   solid (below its documented melting point) also make occasional small trial turns and shifts,

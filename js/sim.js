@@ -43,7 +43,7 @@
     ANNEAL_TRIALS: 0.2, // solid-state annealing: move trials per atom every 4 substeps...
     ANNEAL_ANGLE: 0.5, // ...turning a molecule by up to this many radians...
     ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
-    ICE_A: 29, // O-O spacing of the ice lattice: 5% wider than in the liquid, so ice takes ~10% more room (real: 9%)
+    ICE_A: 31, // O-O spacing of the ice honeycomb: wide enough that ice takes ~7% more room than the liquid (real: 9%)
     CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites
     CRYSTAL_TRIES: 0.3, // join/nucleation attempts per atom every 4 substeps
     CRYSTAL_JOIN_MAX: 250, // a unit joins only if its new spring is strained by at most this (K)
