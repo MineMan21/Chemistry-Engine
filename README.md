@@ -4,10 +4,21 @@ A particle chemistry sandbox that runs in the browser. Pick any of the 118 eleme
 jar, and watch atoms bond into molecules. Heat the jar on a hot plate, pump it down with a vacuum
 pump, or pressurize it from a gas can.
 
-- **Zoomed in (atom view):** ball-and-stick atoms with single, double, triple and ionic bonds,
-  element symbols, partial charges (δ+/δ−) and ion charges. Clicking drops individual atoms.
-- **Zoomed out (bulk view):** every atom becomes a pixel, coloured by the molecule it belongs to,
-  and the simulation keeps running exactly the same way. Clicking adds material by the mole.
+There are three zoom levels over the same running simulation (switch with the **Atoms / Moles /
+Real world** buttons at the top left, or just scroll):
+
+- **Atoms:** ball-and-stick atoms with single, double, triple and ionic bonds, element symbols,
+  partial charges (δ+/δ−) and ion charges. Clicking drops individual atoms.
+- **Moles:** every atom becomes a dot (1 mmol each), coloured by the molecule it belongs to.
+  Clicking adds material by the mole.
+- **Real world:** the jar as you would see it: water as a translucent blue pool with a bright
+  surface, metals as grey lumps, sulfur yellow, salt white, rust red-brown, and coloured gases
+  (chlorine, bromine, iodine, NO₂) as a tinted haze, while colourless gases stay clear. Clicking
+  adds moles here too.
+
+Liquids and solids fall under gravity, land in a pool and spread out. Glass attracts polar
+molecules, so water climbs into a meniscus, thin films and drops cling to the walls, and vapour
+condenses on the room-temperature glass of a hot jar.
 
 ## Running it
 
@@ -24,11 +35,11 @@ npm test
 
 | Action | How |
 | --- | --- |
-| Zoom | Mouse wheel, pinch, `+` / `−`, or the buttons at the top right (`F` fits the jar) |
+| Zoom | Mouse wheel, pinch, `+` / `−`, the Atoms / Moles / Real world buttons, or the buttons at the top right (`F` fits the jar) |
 | Pan | Drag in the jar |
 | Pick an element | Click it in the periodic table |
 | Add atoms | Atom view: click in the jar (1, 5, 20 or 100 per click) |
-| Add moles | Bulk view: click in the jar, or type an amount and press **Add** |
+| Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
 | Spark | Spark tool, then click: a short 4000 K burst that also splits some bonds (makes radicals) |
 | Chill | Chill tool, then click: cools a spot to 80 K |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule. Clicking a row in **Contents** pins that species |
@@ -36,15 +47,17 @@ npm test
 | Pressure | Vacuum pump toggle; gas can toggle with gas choice and flow rate |
 | Pause | Space |
 
-The **Experiments** menu loads ready-made setups: hydrogen + oxygen, sodium + chlorine, liquid
-water, methane + oxygen, iron in hot oxygen, carbon + oxygen, noble gases and liquid nitrogen.
+The **Experiments** menu loads ready-made setups: hydrogen + oxygen, sodium + chlorine, a blob
+of water dropped from mid-air, steam on cold glass, methane + oxygen, iron in hot oxygen, carbon +
+oxygen, noble gases and liquid nitrogen.
 
 ## Scale
 
-The jar is a 32 × 40 nm slice, and each particle statistically stands for **1 mmol** of atoms
+The simulated jar is a 24 × 32 nm slice, and each particle statistically stands for **1 mmol** of atoms
 (6.0 × 10²⁰), so **1 mol = 1000 particles**. That is what lets you add moles at a time and still
 run in real time. The jar is treated as 24 L, so 1 mol of gas at room temperature reads about
-1 atm on the gauge. Diatomic elements (H, N, O, F, Cl, Br, I) are added as X₂ by default, so
+1 atm on the gauge. The real-world view draws that sample as a jar 24 cm wide (its scale bar is
+in cm), while the atom and mole views show nm and Å. Diatomic elements (H, N, O, F, Cl, Br, I) are added as X₂ by default, so
 "1 mol of hydrogen" means 1 mol of H₂.
 
 ## How the chemistry works
@@ -91,6 +104,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   through the jar); the glass loses heat to a 293 K room unless the jar is insulated. Pressure is
   measured from momentum transfer to the lid and upper walls, like a real gauge. The vacuum pump
   removes whole molecules that reach the valve; the gas can injects gas through it.
+- **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
+  a strong settling force only to material that is clearly packed (liquids and solids); gas
+  molecules feel almost none, so vapour still fills the jar. Falling material has a speed limit
+  that drops near the floor, so it lands without heating up. The glass walls and floor attract
+  nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
+  barely for metals) and hold liquid touching them with friction, which gives the meniscus and
+  clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
 
 ### Approximations and known limits
 

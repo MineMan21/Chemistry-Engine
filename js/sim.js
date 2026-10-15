@@ -16,8 +16,8 @@
     KB: 1500, // simulation Boltzmann constant: m*v^2/2 = KB*T per particle (2D)
     R_KJ: 0.008314, // kJ/(mol K)
     DT: 0.0015,
-    W: 3200, // jar interior width (world units)
-    H: 4000, // jar interior height
+    W: 2400, // jar interior width (world units)
+    H: 3200, // jar interior height
     MOL_PER_PARTICLE: 0.001,
     JAR_VOLUME_L: 24, // real volume the jar represents (1 mol of gas at 293 K ~ 1 atm)
     AMBIENT: 293,
@@ -31,8 +31,8 @@
     HB_CONTACT: 0.78, // hydrogen-bonded H...X pairs may approach to this fraction of contact
     METAL_EPS_PER_BP: 1.05, // metallic cohesion well depth (K) per K of boiling point
     G_GAS: 1, // gravity felt by isolated (gas) particles
-    G_CONDENSED: 150, // extra gravity for particles touching others (liquids/solids settle)
-    BULK_VMAX: 50, // max bulk (flow) speed of condensed matter, units/s -> gentle settling
+    G_CONDENSED: 650, // extra gravity for particles touching others (liquids/solids settle)
+    BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
     BULK_VMAX_FLOOR: 15, // ... near the floor, so material lands softly
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
     LN_UNI: 16, // ln of the unimolecular attempt frequency (bond dissociation)
@@ -48,6 +48,12 @@
     PLATE_ZONE: 60, // thickness of the layer above the plate that exchanges heat with it
     WALL_GAMMA: 3, // Langevin coupling to the room through the glass
     WALL_ZONE: 30,
+    WALL_ADH_RANGE: 14, // range of the glass's attraction (units beyond contact)
+    WALL_ADH_SCALE: 0.6, // glass attraction relative to an atom's own dispersion strength
+    WALL_HB: 650, // extra attraction (K) of glass silanol groups for H-bond donors/acceptors
+    WALL_FRICTION: 250, // drag (1/s) on liquid touching the glass, so drops cling instead of sliding
+    CONDUCTION: 8, // heat exchange (1/s) of liquids/solids with the plate, at the floor...
+    CONDUCTION_DEPTH: 350, // ...fading over this height (units)
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
     VALVE_HALF: 140, // half-width of the valve opening in the lid
     MAX_STEP: 6, // max displacement per substep (keeps the integrator stable)
@@ -75,6 +81,7 @@
   const en = new Float32Array(NZ), maxVal = new Uint8Array(NZ), normVal = new Uint8Array(NZ);
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
   const elColor = new Uint32Array(NZ);
+  const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   for (let z = 1; z < NZ; z++) {
     const e = E[z];
     // Dynamical mass. Hydrogen is made heavier (a standard molecular-dynamics trick) so its
@@ -89,6 +96,8 @@
     vdwEps[z] = e.vdwEps;
     metalEps[z] = e.isMetal ? P.METAL_EPS_PER_BP * (e.bp || (e.mp ? e.mp * 2.5 : 3000)) : 0;
     elColor[z] = packColor(e.color);
+    // metals (mercury!) barely wet glass; everything else feels a fraction of its dispersion
+    wallAdh[z] = e.isMetal ? 20 : P.WALL_ADH_SCALE * e.vdwEps * P.VDW_SCALE;
   }
   // Pair tables
   const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ);
@@ -140,6 +149,7 @@
     this.tLoc = new Float32Array(M); // local temperature used for kinetics
     this.tSelf = new Float32Array(M); // each atom's own recent kinetic temperature (EMA)
     this.contacts = new Uint8Array(M); // non-bonded neighbours in contact
+    this.condF = new Float32Array(M); // smoothed 'part of a liquid/solid' flag (0..1), sets gravity
     this.molId = new Int32Array(M);
     this.hbd = new Uint8Array(M); // hydrogen-bond donor (H bonded to N, O or F)
     // batch tag of atoms added together as an element: bonds between same-element atoms of one
@@ -214,7 +224,7 @@
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
-    this.contacts[i] = 0;
+    this.contacts[i] = 0; this.condF[i] = 0;
     this.fresh[i] = 0;
     this.eRef[i] = P.KB * (T || P.AMBIENT);
     this.ghostT[i] = 0;
@@ -399,6 +409,7 @@
     this.x[i] = this.x[last]; this.y[i] = this.y[last];
     this.px[i] = this.px[last]; this.py[i] = this.py[last];
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
+    this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
     this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last];
     this.fresh[i] = this.fresh[last]; this.eRef[i] = this.eRef[last];
@@ -657,6 +668,7 @@
   S.computeForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, el = this.el;
     const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used;
+    const bp = this.bp, MB = P.MAXB;
     const gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
     fx.fill(0, 0, n); fy.fill(0, 0, n);
     contacts.fill(0, 0, n);
@@ -672,7 +684,16 @@
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
       const rc = pairRc[p];
       if (d2 >= rc * rc) return;
-      if ((nb[i] && nb[j]) && (self.isBonded(i, j) || self.isOneThree(i, j))) return;
+      if (nb[i] && nb[j]) {
+        // excluded pairs: bonded (1-2) or sharing a bonded neighbour (1-3); inlined, it is hot
+        const bi = i * MB, nbi = nb[i];
+        for (let k = 0; k < nbi; k++) {
+          const m = bp[bi + k];
+          if (m === j) return;
+          const bm = m * MB, nbm = nb[m];
+          for (let l = 0; l < nbm; l++) if (bp[bm + l] === j) return;
+        }
+      }
       const d = Math.sqrt(d2) || 1e-6;
       let sigma = pairSigma[p];
       // hydrogen bond: donor H and acceptor N/O/F may approach closer and attract strongly
@@ -709,10 +730,10 @@
       }
       const qq = q[i] * q[j];
       if (qq !== 0) {
-        // shifted-potential Coulomb, U = KC q q (1/d - 1/rc): keeps the full short-range
-        // (hydrogen-bond / ionic) attraction while still going to zero at the cutoff
+        // shifted-force Coulomb, U = KC q q (1/d - 1/rc + (d - rc)/rc^2): energy and force both
+        // reach zero smoothly at the cutoff (an abrupt force cutoff slowly heats liquids)
         const dd = d < sigma * 0.8 ? sigma * 0.8 : d;
-        F += P.KC * qq / (dd * dd);
+        F += P.KC * qq * (1 / (dd * dd) - 1 / (rc * rc));
       }
       const fxp = F * dx / d, fyp = F * dy / d;
       fx[i] -= fxp; fy[i] -= fyp;
@@ -756,6 +777,16 @@
     // bulk (flow) velocity of condensed matter per coarse cell
     const mom = this.cellMom, TC = P.TCELL;
     mom.fill(0);
+    // a molecule settles as a whole: an atom counts as condensed if it or a bonded neighbour
+    // touches something; smoothed in time so gravity does not flicker (which would heat liquids)
+    const condF = this.condF, MB = P.MAXB;
+    for (let i = 0; i < n; i++) {
+      let c = contacts[i] >= 2 ? 1 : 0;
+      if (!c) for (let k = 0; k < this.nb[i]; k++) if (contacts[this.bp[i * MB + k]] >= 2) { c = 1; break; }
+      // switches on slowly (sustained packing) and off quickly, so evaporating molecules are
+      // not dragged back into the liquid
+      condF[i] += (c > condF[i] ? 0.03 : 0.25) * (c - condF[i]);
+    }
     for (let i = 0; i < n; i++) {
       if (contacts[i] < 2) continue;
       let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
@@ -770,7 +801,10 @@
       if (v2 > maxS * maxS) { const s = maxS / Math.sqrt(v2); vx *= s; vy *= s; }
       const im = invMass[el[i]];
       const c = contacts[i] > 4 ? 4 : contacts[i];
-      const g = P.G_GAS + (c >= 2 ? P.G_CONDENSED * c * 0.25 : 0);
+      // settling gravity only for material that is clearly packed (passing gas collisions give
+      // a small condF that must not pile the vapour up near the floor)
+      const cs = (condF[i] - 0.5) * 3.3;
+      const g = P.G_GAS + P.G_CONDENSED * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
       let bvx = 0, bvy = 0;
@@ -796,6 +830,24 @@
       if (x[i] < WZ || x[i] > W - WZ || y[i] < WZ) { Tw = P.AMBIENT; gamma = wallG; }
       if (x[i] < rw) wfx = P.K_WALL * (rw - x[i]);
       else if (x[i] > W - rw) wfx = -P.K_WALL * (x[i] - W + rw);
+      // pressure gauge: momentum pushed into the upper half of the side walls (contact only)
+      if (wfx !== 0 && y[i] < H / 2) impulse += Math.abs(wfx) * mass[el[i]] * dt;
+      // glass attracts atoms near the side walls and floor (polar molecules such as water wet
+      // it, which makes the meniscus and lets drops cling); conservative, like the pair wells
+      const adhR = P.WALL_ADH_RANGE;
+      let adhered = false;
+      if (x[i] < rw + adhR || x[i] > W - rw - adhR || y[i] > H - rw - adhR) {
+        const z = el[i];
+        const eA = (wallAdh[z] + ((this.hbd[i] || (HB_ACCEPTOR[z] && this.nb[i])) ? P.WALL_HB : 0)) * P.KB * im;
+        let d = x[i] - rw, pull = 0;
+        if (d >= 0 && d < adhR) { const s = d / adhR; pull = 4 * eA * s * (1 - s * s) / adhR; wfx -= pull; adhered = true; }
+        d = W - rw - x[i];
+        if (d >= 0 && d < adhR) { const s = d / adhR; pull = 4 * eA * s * (1 - s * s) / adhR; wfx += pull; adhered = true; }
+        // the glass is pulled inward by what it attracts: subtract it from the gauge reading
+        if (pull && y[i] < H / 2) impulse -= pull * mass[z] * dt;
+        d = H - rw - y[i];
+        if (d >= 0 && d < adhR) { const s = d / adhR; wfy += 4 * eA * s * (1 - s * s) / adhR; }
+      }
       if (y[i] < rw) {
         wfy = P.K_WALL * (rw - y[i]);
         impulse += wfy * mass[el[i]] * dt;
@@ -803,15 +855,32 @@
         if (y[i] > H - rw) wfy = -P.K_WALL * (y[i] - H + rw);
         Tw = this.plateTemp; gamma = P.PLATE_GAMMA;
       }
-      if (wfx !== 0 && y[i] < H / 2) impulse += Math.abs(wfx) * mass[el[i]] * dt;
+
       if (this.anneal[i] && (--this.anneal[i], contacts[i] >= 1 || this.nb[i] >= 2)) {
-        // freshly added condensed material: remove the heat of settling / self-assembly with a
-        // strong thermostat (free gas atoms are skipped so they keep flying ballistically)
-        Tw = P.AMBIENT; gamma = 40;
+        // freshly added condensed material: remove the heat of settling / self-assembly by
+        // rescaling only the random motion (relative to the local flow), toward room temperature,
+        // so a freshly dropped blob still falls freely
+        let network = false;
+        if (this.nb[i] >= 2) for (let k = 0; k < this.nb[i]; k++) if (this.nb[this.bp[i * MB + k]] >= 2) { network = true; break; }
+        if (network) {
+          // covalent networks (carbon, sulfur...): a plain strong thermostat while they assemble
+          Tw = P.AMBIENT; gamma = 40;
+        } else {
+          const tc = tCell[this.cellOfT[i]] > 1 ? tCell[this.cellOfT[i]] : 1;
+          let f = Math.sqrt(1 + 0.06 * (P.AMBIENT / tc - 1));
+          f = f < 0.9 ? 0.9 : f > 1.03 ? 1.03 : f;
+          vx = bvx + (vx - bvx) * f; vy = bvy + (vy - bvy) * f;
+        }
+      } else if (adhered && contacts[i] >= 1) {
+        // liquid touching the glass: friction, and heat exchange with the room-temperature glass
+        // (so vapour condenses on the walls of a hot jar), unless the jar is insulated
+        Tw = this.insulated ? this.tLoc[i] : P.AMBIENT; gamma = P.WALL_FRICTION;
       } else if (gamma === 0 && this.convection > 0) {
-        // convection: everything exchanges heat with the plate, more strongly near the bottom
+        // convection: everything exchanges heat with the plate, more strongly near the bottom;
+        // liquids and solids also conduct the plate's heat upward through themselves
         const h = y[i] / H;
-        Tw = this.plateTemp; gamma = this.convection * (0.15 + 0.85 * h * h);
+        Tw = this.plateTemp; gamma = this.convection * (0.4 + 0.6 * h * h);
+        if (condF[i] > 0.5) gamma += P.CONDUCTION * Math.exp(-(H - y[i]) / P.CONDUCTION_DEPTH);
       }
       if (gamma > 0) {
         // Langevin (Ornstein-Uhlenbeck) thermostat towards the wall temperature
@@ -1119,7 +1188,9 @@
     const qq = this.q[i] * this.q[j];
     if (qq !== 0) {
       const d0 = sigma * 0.8;
-      U += d >= d0 ? P.KC * qq * (1 / d - 1 / rc) : P.KC * qq * ((1 / d0 - 1 / rc) + (d0 - d) / (d0 * d0));
+      const irc2 = 1 / (rc * rc);
+      U += d >= d0 ? P.KC * qq * (1 / d - 1 / rc + (d - rc) * irc2)
+        : P.KC * qq * ((1 / d0 - 1 / rc + (d0 - rc) * irc2) + (d0 - d) * (1 / (d0 * d0) - irc2));
     }
     return U;
   };
@@ -1497,7 +1568,7 @@
       m.contacts += this.contacts[i];
       if (!m.ionic) for (let k = 0; k < this.nb[i]; k++) if (this.bc[i * MB + k] === 2) { m.ionic = true; break; }
     }
-    const species = new Map();
+    const species = new Map(), tLoc = this.tLoc;
     const descCache = this._descCache || (this._descCache = new Map());
     mols.forEach(function (m) {
       const sig = JSON.stringify(m.counts) + (m.ionic ? 'i' : '');
@@ -1505,11 +1576,12 @@
       if (!d) { d = C.describe(m.counts, m.atoms.length, m.ionic); descCache.set(sig, d); }
       let s = species.get(d.key);
       if (!s) {
-        s = { key: d.key, formula: d.formula, name: d.name, molecules: 0, atoms: 0, condensed: 0, color: speciesColor(d.key, m.counts), first: m.atoms[0] };
+        s = { key: d.key, formula: d.formula, name: d.name, molecules: 0, atoms: 0, condensed: 0, color: speciesColor(d.key, m.counts), first: m.atoms[0], counts: m.counts, ionic: m.ionic, tSum: 0 };
         species.set(d.key, s);
       }
       s.molecules++;
       s.atoms += m.atoms.length;
+      s.tSum += tLoc[m.atoms[0]];
       // networks/lattices are solids; small molecules are condensed when packed against others
       if (m.atoms.length > 12 || m.contacts / m.atoms.length >= 1) s.condensed++;
       m.species = s;
@@ -1526,6 +1598,16 @@
       s.phase = s.condensed / s.molecules > 0.5 ? 'condensed' : 'gas';
     });
     list.sort(function (a, b) { return b.mol - a.mol; });
+    // per-atom species index and each species' real-world look (for the real-world view)
+    const spIdx = this.spIdx || (this.spIdx = new Int32Array(P.MAX));
+    list.forEach(function (s, k) {
+      s.idx = k;
+      s.T = s.tSum / s.molecules;
+      s.look = CE.look ? CE.look.lookOf(s.key, s.counts, s.atoms / s.molecules, s.ionic, s.T) : null;
+    });
+    mols.forEach(function (m) {
+      for (let k = 0; k < m.atoms.length; k++) spIdx[m.atoms[k]] = m.species.idx;
+    });
     this.species = list;
     return list;
   };

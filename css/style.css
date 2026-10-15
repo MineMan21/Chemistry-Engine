@@ -210,13 +210,16 @@ output { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums;
 #hud { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; pointer-events: none; }
 #hud > * { pointer-events: auto; }
 .hud-buttons { display: flex; gap: 6px; }
+.hud-left { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.tiers button { background: var(--panel); padding: 5px 12px; font-size: 13px; }
+.badge { font-weight: 500; }
 .icon-btn { width: 34px; height: 34px; padding: 0; font-size: 18px; background: var(--panel); }
 .badge {
   background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
   padding: 6px 12px; font-size: 12px; font-weight: 600; align-self: flex-start;
 }
 #readouts {
-  position: absolute; top: 56px; left: 12px;
+  position: absolute; top: 92px; left: 12px;
   display: grid; grid-template-columns: auto auto; gap: 2px 12px;
   background: color-mix(in srgb, var(--panel) 85%, transparent);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
