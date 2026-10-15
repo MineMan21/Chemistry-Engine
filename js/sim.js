@@ -58,7 +58,8 @@
     CONDUCTION: 8, // heat exchange (1/s) of liquids/solids with the plate, at the floor...
     CONDUCTION_DEPTH: 350, // ...fading over this height (units)
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
-    VALVE_HALF: 140, // half-width of the valve opening in the lid
+    VALVE_HALF: 140,
+    PUMP_RATE: 0.7, // vacuum pump: fraction of the gas removed per simulated second // half-width of the valve opening in the lid
     MAX_STEP: 6, // max displacement per substep (keeps the integrator stable)
     TCELL: 160, // size of the coarse cells used for the local temperature field
     T_PRIOR: 2,
@@ -186,6 +187,7 @@
     // controls
     this.plateTemp = P.AMBIENT;
     this.convection = P.CONVECTION;
+    this.pumpRate = P.PUMP_RATE; // vacuum pump strength (fraction of the gas removed per second)
     this.insulated = false;
     this.vacuumOn = false;
     this.canOn = false;
@@ -1534,10 +1536,11 @@
       this.impulseTime += P.DT;
       this.reactionWindowTime += P.DT;
     }
-    this.updateGauges();
+    this.updateGauges(substeps * P.DT);
   };
 
-  S.updateGauges = function () {
+  S.updateGauges = function (elapsed) {
+    if (this.vacuumOn && elapsed > 0) this.pump(elapsed);
     if (this._keCount > 0) {
       const T = this._keSum / this._keCount;
       this.temperature = this.n ? T : this.plateTemp;
@@ -1551,6 +1554,38 @@
       this.reactionsPerSec = this.reactionWindow / this.reactionWindowTime;
       this.reactionWindow = 0; this.reactionWindowTime = 0;
     }
+  };
+
+  // Vacuum pump: removes gas-phase molecules from the whole jar at pumpRate (fraction per
+  // simulated second), so the pressure falls exponentially like a real pumped vessel. Liquids
+  // are untouched until they evaporate (so water boils away under vacuum).
+  S.pump = function (elapsed) {
+    const n = this.n, MB = P.MAXB;
+    if (!n) return;
+    const pRemove = 1 - Math.exp(-this.pumpRate * elapsed);
+    const seen = this._pmSeen && this._pmSeen.length >= P.MAX ? this._pmSeen : (this._pmSeen = new Uint32Array(P.MAX));
+    const stamp = this._pmStamp = (this._pmStamp || 0) + 1;
+    const queue = this._pmQueue || (this._pmQueue = new Int32Array(P.MAX));
+    const doomed = [];
+    for (let i = 0; i < n; i++) {
+      if (seen[i] === stamp) continue;
+      let head = 0, tail = 0, cond = 0;
+      queue[tail++] = i; seen[i] = stamp;
+      while (head < tail) {
+        const a = queue[head++];
+        cond += this.condF[a];
+        for (let k = 0; k < this.nb[a]; k++) {
+          const b = this.bp[a * MB + k];
+          if (seen[b] !== stamp) { seen[b] = stamp; queue[tail++] = b; }
+        }
+      }
+      if (tail > 12 || cond / tail >= 0.5) continue;
+      if (this.rng() < pRemove) for (let k = 0; k < tail; k++) doomed.push(queue[k]);
+    }
+    if (!doomed.length) return;
+    doomed.sort(function (a, b) { return b - a; });
+    for (let k = 0; k < doomed.length; k++) this.removeParticle(doomed[k]);
+    this.removedMol += doomed.length * P.MOL_PER_PARTICLE;
   };
 
   // Instantaneous gas pressure (atm) from the jar's contents.

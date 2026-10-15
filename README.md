@@ -47,7 +47,7 @@ npm test
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule. Clicking a row in **Contents** pins that species |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
-| Pressure | Vacuum pump toggle; gas can toggle with gas choice and flow rate |
+| Pressure | Vacuum pump toggle with a strength slider (2–95% of the gas per second); gas can toggle with gas choice and flow rate |
 | Pause | Space |
 
 The **Experiments** menu loads ready-made setups: hydrogen + oxygen, sodium + chlorine, a blob
@@ -107,7 +107,8 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   through the jar); the glass loses heat to a 293 K room unless the jar is insulated. The pressure
   gauge reads the gas in the jar directly each frame (P = nRT/V from the gas-phase molecules and
   their own motion), so it responds immediately when gas is added, heated, pumped out or removed. The vacuum pump
-  removes whole molecules that reach the valve; the gas can injects gas through it.
+  draws gas out of the whole jar (about half of it per simulated second, so the pressure falls
+  off exponentially); liquids stay until they evaporate. The gas can injects gas through the valve.
 - **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
   a strong settling force only to material that is clearly packed (liquids and solids); gas
   molecules feel almost none, so vapour still fills the jar. Falling material has a speed limit
