@@ -93,8 +93,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   until you heat or spark them, while radicals react with it readily.
 - **Energy is conserved.** Reaction enthalpy goes into (or comes out of) the atoms' kinetic
   energy, so exothermic reactions heat the jar and flames are hot. Changes in the atoms'
-  non-bonded interactions during a reaction are accounted for too. When the colliding atoms
-  cannot pay for an endothermic step, the energy is borrowed from the surrounding region.
+  non-bonded interactions during a reaction are accounted for too. The heat is shared with the
+  molecules around the reacting pair (the third bodies that carry it off in a real
+  recombination). When the colliding atoms cannot pay for an endothermic step, the energy is
+  borrowed from the surrounding region.
 - **Geometry.** VSEPR sets the angle around atoms with two bonds (water 104.5°, H₂S 92°, CO₂
   180°); atoms with more bonds spread their neighbours evenly. The inspector shows the real 3D
   shape and angle; the drawing is a 2D projection.
@@ -103,6 +105,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   metallic cohesion. These are calibrated so that water is liquid at room temperature and boils
   off above about 373 K, Br₂ is liquid, I₂ and metals are solid, and N₂, O₂, Cl₂ and Ar are gases
   that condense near their real boiling points.
+- **Heat flow in gas.** Simulated gas molecules collide only a few times per simulated second,
+  far too rarely to carry heat across the jar, so hot gas also passes heat to the cooler gas next
+  to it (energy conserving). This is what lets a flame front run through a whole mixture.
 - **Apparatus.** The hot plate exchanges heat with atoms near the bottom (plus gentle convection
   through the jar); the glass loses heat to a 293 K room unless the jar is insulated. The pressure
   gauge reads the gas in the jar directly each frame (P = nRT/V from the gas-phase molecules and
@@ -123,8 +128,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   so heat capacities and some rates are only roughly right.
 - Each particle is a statistical stand-in for 1 mmol, and every simulated collision represents
   many real ones (folded into the Arrhenius prefactor), so time is compressed and reaction
-  speeds are qualitative. Gas-phase combustion started by a spark spreads as a burn over tens of
-  seconds rather than an instant explosion; a hot plate at 1500–2000 K burns a mixture faster.
+  speeds are qualitative. A sparked 2:1 H₂/O₂ mixture burns through in a second or two
+  (a real one explodes in milliseconds); the flame peaks around 4000–5000 K, hotter than the
+  real ~3000 K because 2D molecules have fewer ways to store the heat, then cools to the room.
 - Resonance, aromaticity, dative bonds, coordination complexes, catalysis, solvation of ions,
   isomers with the same formula and radioactive decay are not modelled.
 - Superheavy elements have estimated electronegativities (from the element above them) and

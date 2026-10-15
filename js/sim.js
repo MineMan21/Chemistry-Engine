@@ -34,6 +34,8 @@
     G_CONDENSED: 650,
     G_SOLID: 110, // gentler settling for solids, so a lump keeps its shape instead of being
     // crushed flat by its own weight (molecular-scale gravity this strong would exceed cohesion) // extra gravity for particles touching others (liquids/solids settle)
+    SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
+    SETTLE_RANGE: 14, // ...and how many more until it is at full strength
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
     BULK_VMAX_FLOOR: 15, // ... near the floor, so material lands softly
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
@@ -42,6 +44,9 @@
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
     // attack triplet O=O (why O2 is slow with fuels and metals but fast with radicals)
+    HEAT_RADIUS: 90, // reaction heat is shared with the particles within this distance...
+    HEAT_GROUP: 24, // ...up to this many (plus their bonded partners)
+    GAS_CONDUCTION: 20, // heat flow (1/s) between the gas of neighbouring coarse cells
     HEAT_FRACTION: 0.8, // share of reaction enthalpy deposited as translational kinetic energy
     K_WALL: 110000, // soft wall stiffness (per unit mass)
     K_ANGLE: 8000, // bending spring stiffness (per unit reduced mass); bending is soft
@@ -255,26 +260,37 @@
     const added0 = this.n;
     const tag = ++this.batch;
     let placed = 0;
-    // occupancy hash of existing + new atoms to avoid overlapping spawns
-    const cell = 2 * r + 30, occ = new Map();
+    // occupancy hash of existing + new atoms (position and radius) to avoid overlapping spawns:
+    // two atoms starting inside each other's repulsion would turn into a hot spot
+    const cell = 2 * Math.max(r, 26) + 30, occ = new Map();
     const keyOf = function (cx, cy) { return cx * 100003 + cy; };
-    const occupy = function (x, y) {
+    const occupy = function (x, y, ra) {
       const k = keyOf(Math.floor(x / cell), Math.floor(y / cell));
-      let a = occ.get(k); if (!a) { a = []; occ.set(k, a); } a.push(x, y);
+      let a = occ.get(k); if (!a) { a = []; occ.set(k, a); } a.push(x, y, ra);
     };
-    for (let i = 0; i < this.n; i++) occupy(this.x[i], this.y[i]);
-    const minD = diatomic ? 2 * r + 8 : 2 * r * 0.95;
-    const free = function (x, y) {
+    for (let i = 0; i < this.n; i++) occupy(this.x[i], this.y[i], radius[this.el[i]]);
+    // gases keep clear of everything; condensed lattices may pack at their own spacing
+    const gap = gas ? 1.1 : 0.95;
+    const free1 = function (x, y) {
       const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
         const arr = occ.get(keyOf(cx + a, cy + b));
         if (!arr) continue;
-        for (let m = 0; m < arr.length; m += 2) {
-          const dx = arr[m] - x, dy = arr[m + 1] - y;
-          if (dx * dx + dy * dy < minD * minD) return false;
+        for (let m = 0; m < arr.length; m += 3) {
+          const dx = arr[m] - x, dy = arr[m + 1] - y, dmin = (r + arr[m + 2]) * gap;
+          if (dx * dx + dy * dy < dmin * dmin) return false;
         }
       }
       return true;
+    };
+    const rng = this.rng;
+    const Ld = diatomic ? (C.pairLength[(z * NZ + z) * 4 + C.pairMaxOrder[z * NZ + z]] || 8) : 0;
+    let ang = 0;
+    const free = function (x, y) {
+      if (!diatomic) return free1(x, y);
+      ang = rng() * Math.PI * 2;
+      const ox = Math.cos(ang) * Ld / 2, oy = Math.sin(ang) * Ld / 2;
+      return free1(x - ox, y - oy) && free1(x + ox, y + oy);
     };
     // Gases: jittered spiral (sunflower) around the drop point. Solids/liquids: a close-packed
     // triangular lattice, so the material starts near its relaxed density (no heat of compaction).
@@ -313,16 +329,17 @@
         ok = free(x, y);
       }
       if (!ok) continue;
-      occupy(x, y);
       if (diatomic) {
-        const L = C.pairLength[(z * NZ + z) * 4 + C.pairMaxOrder[z * NZ + z]] || 8;
-        const a = this.rng() * Math.PI * 2;
+        const L = Ld, a = ang;
+        occupy(x - Math.cos(a) * L / 2, y - Math.sin(a) * L / 2, r);
+        occupy(x + Math.cos(a) * L / 2, y + Math.sin(a) * L / 2, r);
         const i = this.addAtom(z, x - Math.cos(a) * L / 2, y - Math.sin(a) * L / 2, T, tag);
         if (i < 0) break;
         const j = this.addAtom(z, x + Math.cos(a) * L / 2, y + Math.sin(a) * L / 2, T, tag);
         if (j < 0) { this.removeParticle(i); break; }
         this.addBond(i, j, C.pairMaxOrder[z * NZ + z], C.pairClass[z * NZ + z]);
       } else {
+        occupy(x, y, r);
         if (this.addAtom(z, x, y, T, tag) < 0) break;
       }
       placed++;
@@ -510,7 +527,9 @@
     const MB = P.MAXB;
     const dx = this.x[j] - this.x[i], dy = this.y[j] - this.y[i];
     const rest = C.pairLength[(this.el[i] * NZ + this.el[j]) * 4 + order];
-    const len = Math.min(Math.max(Math.sqrt(dx * dx + dy * dy), rest), rest * 2.5);
+    // starts at the atoms' current distance (also when they overlap) and eases to its rest
+    // length kinematically; snapping it there in one step would fling the atoms apart
+    const len = Math.min(Math.max(Math.sqrt(dx * dx + dy * dy), rest * 0.4), rest * 2.5);
     let k = this.nb[i]++;
     this.bp[i * MB + k] = j; this.bo[i * MB + k] = order; this.bc[i * MB + k] = cls; this.bl[i * MB + k] = len;
     k = this.nb[j]++;
@@ -528,6 +547,9 @@
     if (ki < 0 || kj < 0) return;
     const old = this.bo[i * MB + ki];
     this.used[i] += order - old; this.used[j] += order - old;
+    // once a bond has been broken the atoms are reaction products, no longer freshly added
+    // material assembling itself: from now on re-bonding releases its heat
+    if (order < old) { this.tag[i] = 0; this.tag[j] = 0; }
     if (order > 0) {
       this.bo[i * MB + ki] = order; this.bo[j * MB + kj] = order;
     } else {
@@ -822,6 +844,10 @@
     // bulk (flow) velocity of condensed matter per coarse cell
     const mom = this.cellMom, TC = P.TCELL;
     mom.fill(0);
+    // number of packed atoms per coarse cell: only real liquids/solids settle, not a pair of gas
+    // molecules that briefly stick together (strong gravity switching on and off pumps heat in)
+    const cndN = this.cellCnd || (this.cellCnd = new Uint16Array(tgw * tgh));
+    cndN.fill(0);
     // a molecule settles as a whole: an atom counts as condensed if it or a bonded neighbour
     // touches something; smoothed in time so gravity does not flicker (which would heat liquids)
     const condF = this.condF, MB = P.MAXB;
@@ -839,6 +865,7 @@
       tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
       const c3 = (tcy * tgw + tcx) * 3, m = mass[el[i]];
       mom[c3] += m * (x[i] - px[i]); mom[c3 + 1] += m * (y[i] - py[i]); mom[c3 + 2] += m;
+      cndN[tcy * tgw + tcx]++;
     }
     for (let i = 0; i < n; i++) {
       let vx = x[i] - px[i], vy = y[i] - py[i];
@@ -848,7 +875,14 @@
       const c = contacts[i] > 4 ? 4 : contacts[i];
       // settling gravity only for material that is clearly packed (passing gas collisions give
       // a small condF that must not pile the vapour up near the floor)
-      const cs = (condF[i] - 0.5) * 3.3;
+      let cs = (condF[i] - 0.5) * 3.3;
+      if (cs > 0) {
+        let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
+        tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
+        tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
+        const nc = (cndN[tcy * tgw + tcx] - P.SETTLE_MIN) / P.SETTLE_RANGE;
+        cs *= nc <= 0 ? 0 : nc >= 1 ? 1 : nc;
+      }
       const g = P.G_GAS + (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
@@ -1044,6 +1078,56 @@
     }
   };
 
+  // Heat conduction through the gas between neighbouring coarse cells. Simulated gas molecules
+  // collide only a few times per simulated second, far too rarely to carry heat (a flame front)
+  // across the jar the way a real gas does, so energy also flows from hot gas to cooler gas
+  // next to it. Each cell's gas atoms are rescaled together: energy is conserved exactly.
+  S.gasConduction = function () {
+    const kappa = P.GAS_CONDUCTION;
+    if (!kappa) return;
+    const n = this.n, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
+    const tgw = this.tgw, tgh = this.tgh, nc = tgw * tgh, condF = this.condF, cellOf = this.cellOfT;
+    if (!this._gKE || this._gKE.length !== nc) {
+      this._gKE = new Float64Array(nc); this._gN = new Float64Array(nc); this._gdE = new Float64Array(nc);
+    }
+    const gKE = this._gKE, gN = this._gN, gdE = this._gdE;
+    gKE.fill(0); gN.fill(0); gdE.fill(0);
+    const idt2 = 1 / (P.DT * P.DT);
+    for (let i = 0; i < n; i++) {
+      if (condF[i] > 0.5) continue;
+      const vx = x[i] - px[i], vy = y[i] - py[i], c = cellOf[i];
+      gKE[c] += 0.5 * mass[el[i]] * (vx * vx + vy * vy) * idt2;
+      gN[c]++;
+    }
+    const f = kappa * P.DT;
+    for (let cy = 0; cy < tgh; cy++) {
+      for (let cx = 0; cx < tgw; cx++) {
+        const a = cy * tgw + cx;
+        if (gN[a] < 1) continue;
+        const Ta = gKE[a] / gN[a];
+        for (let d = 0; d < 2; d++) {
+          const b = d === 0 ? (cx + 1 < tgw ? a + 1 : -1) : (cy + 1 < tgh ? a + tgw : -1);
+          if (b < 0 || gN[b] < 1) continue;
+          // flow ~ temperature difference times the smaller heat capacity
+          const flow = f * (Ta - gKE[b] / gN[b]) * Math.min(gN[a], gN[b]);
+          gdE[a] -= flow; gdE[b] += flow;
+        }
+      }
+    }
+    for (let c = 0; c < nc; c++) {
+      if (gN[c] < 1 || gdE[c] === 0) { gdE[c] = 1; continue; }
+      const ke = gKE[c], e = ke + gdE[c];
+      gdE[c] = ke > 0 && e > 0 ? Math.sqrt(e / ke) : 1; // reuse as the velocity scale
+    }
+    for (let i = 0; i < n; i++) {
+      if (condF[i] > 0.5) continue;
+      const s = gdE[cellOf[i]];
+      if (s === 1) continue;
+      px[i] = x[i] - (x[i] - px[i]) * s;
+      py[i] = y[i] - (y[i] - py[i]) * s;
+    }
+  };
+
   // Moves each bond's target length toward its rest length, then re-satisfies all bonds with a
   // kinematic constraint pass (positions and previous positions move together), so the
   // geometry change of a new/changed bond never turns into velocity - even in networks where
@@ -1173,38 +1257,91 @@
     this.heatRaw(i, j, dE * P.HEAT_FRACTION * ENERGY_PER_KJ);
   };
 
-  // Same as heat() with the energy already in simulation units.
+  // Same as heat() with the energy already in simulation units. The energy is shared with the
+  // molecules around the reacting pair (the third bodies that carry off the heat of a real
+  // recombination): the two atoms alone cannot hold it, because a new rigid bond leaves them
+  // only rotation, and the constraint would throw most of it away.
   S.heatRaw = function (i, j, e) {
+    const dt = P.DT, x = this.x, y = this.y, px = this.px, py = this.py, MB = P.MAXB;
+    const grp = this._grp || (this._grp = new Int32Array(P.HEAT_GROUP + 2 * MB + 2));
+    let g = 0;
+    grp[g++] = i; grp[g++] = j;
+    const self = this;
+    if (this.cellItems) {
+      this.query(0.5 * (x[i] + x[j]), 0.5 * (y[i] + y[j]), P.HEAT_RADIUS, function (k) {
+        if (g >= P.HEAT_GROUP || k === i || k === j) return;
+        for (let a = 0; a < g; a++) if (grp[a] === k) return;
+        grp[g++] = k;
+      });
+    }
+    // whole small molecules move together, so scaling their velocities keeps bonds rigid
+    for (let a = 0, g0 = g; a < g0; a++) {
+      const k = grp[a];
+      for (let b = 0; b < this.nb[k] && g < grp.length; b++) {
+        const m = this.bp[k * MB + b];
+        let seen = false;
+        for (let c = 0; c < g; c++) if (grp[c] === m) { seen = true; break; }
+        if (!seen) grp[g++] = m;
+      }
+    }
+    // a new bond i-j holds the pair at fixed distance: its closing speed along the bond would be
+    // removed by the constraint, so turn it into heat here instead of losing it
+    if (this.isBonded(i, j)) {
+      const mi = mass[this.el[i]], mj = mass[this.el[j]], mu = mi * mj / (mi + mj);
+      const dx = x[j] - x[i], dy = y[j] - y[i];
+      const d = Math.sqrt(dx * dx + dy * dy) || 1e-6, ux = dx / d, uy = dy / d;
+      const vr = ((x[j] - px[j]) - (x[i] - px[i])) * ux + ((y[j] - py[j]) - (y[i] - py[i])) * uy;
+      // remove the radial relative motion (momentum conserving) and bank its energy
+      px[i] -= vr * ux * mj / (mi + mj); py[i] -= vr * uy * mj / (mi + mj);
+      px[j] += vr * ux * mi / (mi + mj); py[j] += vr * uy * mi / (mi + mj);
+      e += 0.5 * mu * vr * vr / (dt * dt);
+    }
+    let M = 0, cx = 0, cy = 0;
+    for (let a = 0; a < g; a++) {
+      const k = grp[a], m = mass[this.el[k]];
+      M += m; cx += m * (x[k] - px[k]); cy += m * (y[k] - py[k]);
+    }
+    cx /= M; cy /= M;
+    let K = 0;
+    for (let a = 0; a < g; a++) {
+      const k = grp[a], rx = x[k] - px[k] - cx, ry = y[k] - py[k] - cy;
+      K += 0.5 * mass[this.el[k]] * (rx * rx + ry * ry);
+    }
+    K /= dt * dt;
+    let s;
+    if (e >= 0) {
+      if (K < 1e-9) return this.heatPair(i, j, e);
+      s = Math.sqrt((K + e) / K);
+    } else {
+      // take up to half of what the group has; the rest becomes a local energy debt that is
+      // drained from the cell's particles, so energy is conserved overall
+      const take = Math.min(-e, K * 0.5);
+      this.cellDebt[this.cellOfT[i]] += -e - take;
+      s = Math.sqrt((K - take) / Math.max(K, 1e-9));
+    }
+    for (let a = 0; a < g; a++) {
+      const k = grp[a];
+      px[k] = x[k] - (cx + (x[k] - px[k] - cx) * s);
+      py[k] = y[k] - (cy + (y[k] - py[k] - cy) * s);
+      if (e > 0) this.eRef[k] += e / g;
+    }
+  };
+
+  // Fallback: deposit into the relative motion of the pair alone (a group with no motion).
+  S.heatPair = function (i, j, e) {
     const dt = P.DT, x = this.x, y = this.y, px = this.px, py = this.py;
     const mi = mass[this.el[i]], mj = mass[this.el[j]];
-    let vix = (x[i] - px[i]) / dt, viy = (y[i] - py[i]) / dt;
-    let vjx = (x[j] - px[j]) / dt, vjy = (y[j] - py[j]) / dt;
+    const vix = (x[i] - px[i]) / dt, viy = (y[i] - py[i]) / dt;
+    const vjx = (x[j] - px[j]) / dt, vjy = (y[j] - py[j]) / dt;
     const M = mi + mj;
     const cx = (mi * vix + mj * vjx) / M, cy = (mi * viy + mj * vjy) / M;
-    let rix = vix - cx, riy = viy - cy, rjx = vjx - cx, rjy = vjy - cy;
-    const keRel = 0.5 * mi * (rix * rix + riy * riy) + 0.5 * mj * (rjx * rjx + rjy * rjy);
-    if (e >= 0) {
-      if (keRel < 1e-9) {
-        const a = this.rng() * Math.PI * 2;
-        rix = Math.cos(a) / mi; riy = Math.sin(a) / mi; rjx = -Math.cos(a) / mj; rjy = -Math.sin(a) / mj;
-        const k0 = 0.5 * mi * (rix * rix + riy * riy) + 0.5 * mj * (rjx * rjx + rjy * rjy);
-        const s = Math.sqrt(e / k0);
-        rix *= s; riy *= s; rjx *= s; rjy *= s;
-      } else {
-        const s = Math.sqrt((keRel + e) / keRel);
-        rix *= s; riy *= s; rjx *= s; rjy *= s;
-      }
-    } else {
-      // take what the pair has (keeping 10%); the rest becomes a global energy debt that is
-      // drained from all particles, so energy is conserved overall
-      const take = Math.min(-e, keRel * 0.9);
-      this.cellDebt[this.cellOfT[i]] += -e - take;
-      const s = Math.sqrt((keRel - take) / Math.max(keRel, 1e-9));
-      rix *= s; riy *= s; rjx *= s; rjy *= s;
-    }
+    const a = this.rng() * Math.PI * 2;
+    let rix = Math.cos(a) / mi, riy = Math.sin(a) / mi, rjx = -Math.cos(a) / mj, rjy = -Math.sin(a) / mj;
+    const k0 = 0.5 * mi * (rix * rix + riy * riy) + 0.5 * mj * (rjx * rjx + rjy * rjy);
+    const s = Math.sqrt(e / k0);
+    rix *= s; riy *= s; rjx *= s; rjy *= s;
     px[i] = x[i] - (cx + rix) * dt; py[i] = y[i] - (cy + riy) * dt;
     px[j] = x[j] - (cx + rjx) * dt; py[j] = y[j] - (cy + rjy) * dt;
-    if (e > 0) { this.eRef[i] += e * mj / M; this.eRef[j] += e * mi / M; }
   };
 
   // Non-bonded potential energy between i and j, mirroring the forces in computeForces().
@@ -1492,7 +1629,13 @@
         if (j < i) continue;
         const rest = C.pairLength[(el[i] * NZ + el[j]) * 4 + this.bo[i * MB + k]];
         const dx = x[j] - x[i], dy = y[j] - y[i];
-        if (dx * dx + dy * dy > 9 * rest * rest) { this.setBond(i, j, 0); k--; }
+        if (dx * dx + dy * dy > 9 * rest * rest) {
+          // the bond is broken, so its energy is paid from the surroundings like a dissociation
+          const be = C.bondEnergy(el[i], el[j], this.bo[i * MB + k]);
+          this.setBond(i, j, 0);
+          this.heat(i, j, -be);
+          k--;
+        }
       }
     }
   };
@@ -1525,6 +1668,7 @@
       this.solveBonds(P.SHAKE_ITERS);
       this.rampBonds();
       this.walls();
+      this.gasConduction();
       this.react();
       if (this.substep % 4 === 0) {
         this.bondEvents(P.DT * 4);

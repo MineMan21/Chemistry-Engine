@@ -100,6 +100,19 @@ test('hydrogen burns to water on a hot plate', function () {
   assert.ok(mol(sim, 'H2O') > 0.1, 'water ' + mol(sim, 'H2O'));
 });
 
+test('a spark burns a 2:1 hydrogen/oxygen mix through in a few seconds', function () {
+  const sim = newSim(11);
+  sim.addMoles(Z('H'), 1, P.W / 2, P.H * 0.35);
+  sim.addMoles(Z('O'), 0.5, P.W / 2, P.H * 0.65);
+  run(sim, 2);
+  assert.ok(mol(sim, 'H2O') < 0.01, 'no water before the spark');
+  for (let f = 0; f < 10; f++) { sim.spark(P.W / 2, P.H * 0.6, 380, 4000); sim.step(9); }
+  run(sim, 4);
+  // nearly all the oxygen is used up (the rest is radicals still recombining)
+  assert.ok(mol(sim, 'O2') < 0.05, 'O2 left ' + mol(sim, 'O2'));
+  assert.ok(mol(sim, 'H2O') > 0.6, 'water ' + mol(sim, 'H2O'));
+});
+
 test('sodium and chlorine form sodium chloride', function () {
   const sim = newSim(6);
   sim.addMoles(Z('Na'), 0.4, P.W / 2, P.H * 0.85);
