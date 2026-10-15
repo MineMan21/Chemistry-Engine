@@ -104,8 +104,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   off above about 373 K, Br₂ is liquid, I₂ and metals are solid, and N₂, O₂, Cl₂ and Ar are gases
   that condense near their real boiling points.
 - **Apparatus.** The hot plate exchanges heat with atoms near the bottom (plus gentle convection
-  through the jar); the glass loses heat to a 293 K room unless the jar is insulated. Pressure is
-  measured from momentum transfer to the lid and upper walls, like a real gauge. The vacuum pump
+  through the jar); the glass loses heat to a 293 K room unless the jar is insulated. The pressure
+  gauge reads the gas in the jar directly each frame (P = nRT/V from the gas-phase molecules and
+  their own motion), so it responds immediately when gas is added, heated, pumped out or removed. The vacuum pump
   removes whole molecules that reach the valve; the gas can injects gas through it.
 - **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
   a strong settling force only to material that is clearly packed (liquids and solids); gas
