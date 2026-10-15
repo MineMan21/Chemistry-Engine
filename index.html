@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chemistry Engine</title>
+  <meta name="description" content="A particle chemistry sandbox: drop any of the 118 elements into a jar, heat it, pump it, and watch molecules form.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <main id="stage">
+      <canvas id="view" aria-label="Simulation jar"></canvas>
+      <div id="hud">
+        <div id="mode-badge" class="badge"></div>
+        <div class="hud-buttons">
+          <button id="zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
+          <button id="zoom-out" class="icon-btn" title="Zoom out (−)">−</button>
+          <button id="zoom-fit" class="icon-btn" title="Fit jar (F)">⤢</button>
+        </div>
+      </div>
+      <div id="readouts">
+        <div><span class="label">Jar</span><span id="ro-temp">293 K</span></div>
+        <div><span class="label">Pressure</span><span id="ro-press">0.00 atm</span></div>
+        <div><span class="label">Atoms</span><span id="ro-atoms">0</span></div>
+        <div><span class="label">Reactions</span><span id="ro-rx">0/s</span></div>
+      </div>
+      <div id="inspector" hidden></div>
+      <div id="toast" hidden></div>
+    </main>
+
+    <aside id="panel">
+      <header class="panel-header">
+        <h1>Chemistry Engine</h1>
+        <div class="row">
+          <button id="play" class="btn" title="Pause / resume (Space)">Pause</button>
+          <label class="field-inline">Speed
+            <select id="speed">
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <section>
+        <h2>Tool</h2>
+        <div class="segmented" id="tools">
+          <button data-tool="drop" class="active" title="Drop the selected element">Drop</button>
+          <button data-tool="spark" title="Ignite: heat a spot to 3000 K">Spark</button>
+          <button data-tool="cool" title="Cold finger: chill a spot to 80 K">Chill</button>
+          <button data-tool="inspect" title="Click a molecule to pin its details">Inspect</button>
+        </div>
+        <p class="hint">Scroll to zoom, drag to pan. Zoom in to see atoms and bonds; zoom out for the bulk view.</p>
+      </section>
+
+      <section>
+        <h2>Elements</h2>
+        <div id="ptable" class="ptable" role="grid" aria-label="Periodic table"></div>
+        <div id="el-info" class="el-info"></div>
+      </section>
+
+      <section id="add-section">
+        <h2>Add to jar</h2>
+        <div id="add-atoms" class="add-mode">
+          <p class="mode-title">Atom view: click in the jar to drop atoms</p>
+          <div class="row">
+            <span class="label">Per click</span>
+            <div class="segmented small" id="per-click">
+              <button data-n="1" class="active">1</button>
+              <button data-n="5">5</button>
+              <button data-n="20">20</button>
+              <button data-n="100">100</button>
+            </div>
+          </div>
+        </div>
+        <div id="add-moles" class="add-mode">
+          <p class="mode-title">Bulk view: add by the mole</p>
+          <div class="row">
+            <input id="mol-amount" type="number" min="0.01" max="20" step="0.1" value="1" aria-label="Moles">
+            <span class="label">mol</span>
+            <button id="add-btn" class="btn primary">Add</button>
+          </div>
+          <p class="hint">Click in the jar to pour there, or press Add to pour from the top.</p>
+        </div>
+        <label class="check"><input id="natural" type="checkbox" checked> Natural form (H₂, N₂, O₂, F₂, Cl₂, Br₂, I₂)</label>
+        <p class="hint" id="scale-note"></p>
+      </section>
+
+      <section>
+        <h2>Hot plate</h2>
+        <div class="row">
+          <input id="plate" type="range" min="0" max="1000" value="500" aria-label="Hot plate temperature">
+          <output id="plate-out">293 K</output>
+        </div>
+        <div class="chips" id="plate-presets">
+          <button data-t="77">77 K</button>
+          <button data-t="273">Ice</button>
+          <button data-t="293">Room</button>
+          <button data-t="373">Boil</button>
+          <button data-t="800">800 K</button>
+          <button data-t="2000">Flame</button>
+        </div>
+        <label class="check"><input id="insulated" type="checkbox"> Insulated jar (no heat loss to the room)</label>
+      </section>
+
+      <section>
+        <h2>Pressure</h2>
+        <div class="row">
+          <button id="vacuum" class="btn toggle">Vacuum pump: off</button>
+        </div>
+        <div class="row">
+          <button id="can" class="btn toggle">Gas can: shut</button>
+          <select id="can-gas" aria-label="Gas in the can">
+            <option value="N2">N₂</option>
+            <option value="O2">O₂</option>
+            <option value="air">Air</option>
+            <option value="Ar">Ar</option>
+            <option value="He">He</option>
+            <option value="H2">H₂</option>
+            <option value="Cl2">Cl₂</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="label">Flow</span>
+          <input id="can-rate" type="range" min="0.05" max="3" step="0.05" value="0.5" aria-label="Gas can flow">
+          <output id="can-rate-out">0.5 mol/s</output>
+        </div>
+      </section>
+
+      <section>
+        <h2>Contents</h2>
+        <div id="contents" class="contents"></div>
+      </section>
+
+      <section>
+        <h2>Experiments</h2>
+        <div class="row">
+          <select id="preset" aria-label="Experiment preset">
+            <option value="">Choose a setup…</option>
+            <option value="h2o2">Hydrogen + oxygen (spark it!)</option>
+            <option value="nacl">Sodium + chlorine → salt</option>
+            <option value="water">Liquid water (boil it)</option>
+            <option value="methane">Methane + oxygen (spark it!)</option>
+            <option value="rust">Iron in hot oxygen</option>
+            <option value="carbon">Carbon + oxygen (coal)</option>
+            <option value="noble">Noble gases (inert)</option>
+            <option value="nitrogen">Liquid nitrogen at 60 K</option>
+          </select>
+          <button id="preset-go" class="btn">Load</button>
+        </div>
+        <div class="row">
+          <label class="field-inline">Colour by
+            <select id="color-mode">
+              <option value="molecule">Molecule</option>
+              <option value="element">Element</option>
+            </select>
+          </label>
+          <button id="clear" class="btn danger">Empty jar</button>
+        </div>
+      </section>
+      <footer class="hint">Rule-based chemistry: real element data drives bonding, energies and geometry. See README for the model.</footer>
+    </aside>
+  </div>
+
+  <script src="js/elements.js"></script>
+  <script src="js/chemistry.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "chemistry-engine",
+  "version": "0.1.0",
+  "description": "Browser particle chemistry sandbox: all 118 elements, rule-based reactions, a jar with hot plate, vacuum pump and gas can.",
+  "private": true,
+  "scripts": {
+    "test": "node tests/sim.test.js"
+  },
+  "license": "MIT"
+}
