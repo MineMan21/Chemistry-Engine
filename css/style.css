@@ -24,6 +24,13 @@
   --cat-noble: #4b3f7a;
   --cat-lanthanide: #6a3f62;
   --cat-actinide: #5a3a4a;
+  --ph-solid: #3987e5;
+  --ph-liquid: #199e70;
+  --ph-gas: #d95926;
+  --ph-sc: #8a98a8;
+  --ph-fill: 0.2;
+  --ph-grid: #222c38;
+  --ph-axis: #3a4656;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -51,6 +58,13 @@
     --cat-noble: #d6cff0;
     --cat-lanthanide: #ecd0e6;
     --cat-actinide: #e4ccd6;
+    --ph-solid: #2a78d6;
+    --ph-liquid: #1baf7a;
+    --ph-gas: #eb6834;
+    --ph-sc: #8a95a3;
+    --ph-fill: 0.14;
+    --ph-grid: #e6ebf0;
+    --ph-axis: #c3ccd6;
     color-scheme: light;
   }
 }
@@ -79,6 +93,13 @@
   --cat-noble: #d6cff0;
   --cat-lanthanide: #ecd0e6;
   --cat-actinide: #e4ccd6;
+  --ph-solid: #2a78d6;
+  --ph-liquid: #1baf7a;
+  --ph-gas: #eb6834;
+  --ph-sc: #8a95a3;
+  --ph-fill: 0.14;
+  --ph-grid: #e6ebf0;
+  --ph-axis: #c3ccd6;
   color-scheme: light;
 }
 
@@ -263,3 +284,49 @@ output { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums;
 .mol-chips .empty { color: var(--muted); font-size: 12px; }
 #save-pinned { position: absolute; left: 12px; bottom: 48px; }
 .el-info .big.mol { font-size: 15px; width: auto; min-width: 56px; padding: 0 8px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+
+/* phase diagram */
+.phase-btn { margin-top: 8px; font-size: 12px; padding: 4px 10px; }
+.el-info .phase-btn { grid-column: 1 / -1; justify-self: start; margin-top: 4px; }
+.phase-dialog {
+  position: fixed; inset: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.phase-dialog[hidden] { display: none; }
+.phase-card {
+  width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 18px 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.phase-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.phase-head h2 { font-size: 17px; text-transform: none; letter-spacing: 0; color: var(--text); margin: 0; }
+.phase-sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.phase-svg { width: 100%; height: auto; display: block; margin-top: 8px; touch-action: none; }
+.phase-svg text { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+.phase-svg .ph-axis text, .phase-svg text.ph-axis-title { font-variant-numeric: tabular-nums; }
+.phase-svg .ph-axis-title { fill: var(--muted); font-size: 12px; }
+.ph-grid line { stroke: var(--ph-grid); stroke-width: 1; }
+.ph-baseline { stroke: var(--ph-axis); stroke-width: 1; }
+.ph-solid { fill: var(--ph-solid); fill-opacity: var(--ph-fill); }
+.ph-liquid { fill: var(--ph-liquid); fill-opacity: var(--ph-fill); }
+.ph-gas { fill: var(--ph-gas); fill-opacity: calc(var(--ph-fill) * 0.7); }
+.ph-sc { fill: var(--ph-sc); fill-opacity: calc(var(--ph-fill) * 0.8); }
+.ph-line { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; }
+.ph-sc-edge { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; }
+.ph-ref { stroke: var(--muted); stroke-width: 1; opacity: 0.6; }
+.phase-svg .ph-ref-label { font-size: 11px; }
+.phase-svg .ph-region { fill: var(--text); font-size: 13px; font-weight: 600; letter-spacing: 0.08em; }
+.phase-svg .ph-region-sm { font-size: 11px; }
+.ph-point { fill: var(--text); stroke: var(--panel); stroke-width: 2; }
+.phase-svg .ph-point-label { fill: var(--text); font-size: 12px; }
+.ph-jar circle { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.ph-jar .ph-jar-dot { fill: var(--accent); stroke: none; }
+.phase-svg .ph-jar-label { fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }
+.ph-hover line { stroke: var(--muted); stroke-width: 1; }
+.ph-tip { fill: var(--panel-2); stroke: var(--border); }
+.phase-svg .ph-tip-text { fill: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ph-table { border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+.ph-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 16px 3px 0; }
+.ph-table td { font-variant-numeric: tabular-nums; padding: 3px 0; }
+.phase-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.45; }

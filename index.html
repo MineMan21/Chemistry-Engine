@@ -37,6 +37,19 @@
       <div id="toast" hidden></div>
     </main>
 
+    <div id="phase-dialog" class="phase-dialog" role="dialog" aria-modal="true" aria-labelledby="phase-title" hidden>
+      <div class="phase-card">
+        <header class="phase-head">
+          <div>
+            <h2 id="phase-title">Phase diagram</h2>
+            <p id="phase-sub" class="phase-sub"></p>
+          </div>
+          <button id="phase-close" class="icon-btn" aria-label="Close phase diagram" title="Close (Esc)">×</button>
+        </header>
+        <div id="phase-body"></div>
+      </div>
+    </div>
+
     <aside id="panel">
       <header class="panel-header">
         <h1>Chemistry Engine</h1>
@@ -155,6 +168,7 @@
       <section>
         <h2>Contents</h2>
         <div id="contents" class="contents"></div>
+        <button id="phase-focus" class="btn phase-btn" hidden></button>
         <p class="hint">Click a substance to highlight all of it in the jar (Esc clears).</p>
       </section>
 
@@ -192,8 +206,10 @@
   <script src="js/elements.js"></script>
   <script src="js/chemistry.js"></script>
   <script src="js/appearance.js"></script>
+  <script src="js/phase.js"></script>
   <script src="js/sim.js"></script>
   <script src="js/render.js"></script>
+  <script src="js/phasechart.js"></script>
   <script src="js/molecules.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>

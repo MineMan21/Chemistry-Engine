@@ -47,6 +47,7 @@ npm test
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
+| Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
 | Pressure | Vacuum pump toggle with a strength slider (2–95% of the gas per second); gas can toggle with gas choice and flow rate |
 | Pause | Space |
@@ -105,7 +106,17 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   electrostatics, explicit hydrogen bonds (H on N/O/F to N/O/F), ionic Coulomb forces and
   metallic cohesion. These are calibrated so that water is liquid at room temperature and boils
   off above about 373 K, Br₂ is liquid, I₂ and metals are solid, and N₂, O₂, Cl₂ and Ar are gases
-  that condense near their real boiling points.
+  that condense near their real boiling points. Hydrogen bonds are directional: strongest when the
+  O–H points straight at the neighbouring O, which is what lets water freeze into an ordered,
+  open lattice rather than a dense heap.
+- **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
+  that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
+  solid (below its documented melting point) also make occasional small trial turns and shifts,
+  accepted by the Boltzmann (Metropolis) rule at the local temperature with the energy change
+  paid from local heat. That only speeds up reaching equilibrium: water cooled below 273 K, or
+  frost growing from vapour, settles into ordered rows instead of a frozen glass. The same
+  melting points mark frozen molecular solids as solids for the settling force, so ice is not
+  squashed like a liquid.
 - **Heat flow in gas.** Simulated gas molecules collide only a few times per simulated second,
   far too rarely to carry heat across the jar, so hot gas also passes heat to the cooler gas next
   to it (energy conserving). This is what lets a flame front run through a whole mixture.
@@ -146,6 +157,8 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 | `js/elements.js` | Data for all 118 elements, periodic table layout and categories |
 | `js/chemistry.js` | Bond classes, bond energies and lengths, valence rules, VSEPR, formula naming |
 | `js/sim.js` | The particle simulation: forces, constraints, reactions, thermostats, pump and can |
+| `js/phase.js` | Triple/critical points and normal melting/boiling points for documented substances, and the phase-boundary curves built from them |
+| `js/phasechart.js` | The phase diagram chart (SVG) and its table of key values |
 | `js/render.js` | Canvas drawing of the apparatus, atom view and pixel bulk view |
 | `js/ui.js` | Periodic table, element card, contents list and inspector |
 | `js/main.js` | Input handling, controls, presets and the main loop |

@@ -27,8 +27,12 @@
     PARTIAL_CHARGE: 0.3, // partial charge per unit electronegativity difference
     VDW_SCALE: 2.25, // calibration factor for van der Waals well depths (2D, short-ranged well)
     MOL_POLARIZABILITY: 0, // (disabled) per-bond dispersion boost; it made bonding exothermic
-    HB_EPS: 550, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker
+    HB_EPS: 1100, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker
+    HB_ANGLE_POW: 2, // directionality of hydrogen bonds: strength ~ cos^n of the D-H...A bend
     HB_CONTACT: 0.78, // hydrogen-bonded H...X pairs may approach to this fraction of contact
+    ANNEAL_TRIALS: 0.2, // solid-state annealing: move trials per atom every 4 substeps...
+    ANNEAL_ANGLE: 0.5, // ...turning a molecule by up to this many radians...
+    ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
     METAL_EPS_PER_BP: 1.05, // metallic cohesion well depth (K) per K of boiling point
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
@@ -167,6 +171,8 @@
     // batch just assemble the element's standard state (S8, graphite...), which releases no heat
     this.tag = new Int32Array(M);
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
+    this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
+    this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
     this.batch = 0;
     this.molColor = new Uint32Array(M);
     // spatial grid
@@ -233,6 +239,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0;
     this.anneal[i] = P.ANNEAL_STEPS;
+    this.meltT[i] = 0; this.gAcc[i] = 0;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -459,7 +466,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.gAcc[i] = this.gAcc[last];
     this.fresh[i] = this.fresh[last]; this.eRef[i] = this.eRef[last];
     for (let k = 0; k < GS; k++) {
       const g = this.ghost[last * GS + k];
@@ -636,6 +643,8 @@
   // networks (chains/rings/lattices of multiply bonded atoms) are; molecular liquids are not.
   S.isSolidAtom = function (i) {
     const z = this.el[i], nb = this.nb[i];
+    // a molecular solid (ice, dry ice, solid iodine...) below its documented melting point
+    if (this.meltT[i] && this.tLoc[i] < this.meltT[i] && this.condF[i] > 0.5) return true;
     if (isMetal[z] && nb === 0) return this.tLoc[i] < meltK[z];
     if (nb === 0) return false;
     const MB = P.MAXB, base = i * MB;
@@ -785,7 +794,6 @@
         else {
           const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
           eps = pairEps[p] * vdwScale * (1 + molPol * bi) * (1 + molPol * bj);
-          if (hbs) eps += hbs * hbEps;
         }
         F = -4 * eps * s * (1 - s * s) / w;
         if (s < 0.25) { contacts[i]++; contacts[j]++; }
@@ -805,6 +813,35 @@
       const fxp = F * dx / d, fyp = F * dy / d;
       fx[i] -= fxp; fy[i] -= fyp;
       fx[j] += fxp; fy[j] += fyp;
+      if (hbs) hbond(i, j, d, sigma, rc, hbs * hbEps);
+    }
+
+    // Directional hydrogen bond D-H...A: strongest when the H points straight at the acceptor,
+    // U = -G w(d) a(cos), with w the usual well shape in the H...A distance and a = cos^m of the
+    // angle between D->H and H->A. This is what builds open, ordered ice instead of a dense heap.
+    const hbPow = P.HB_ANGLE_POW;
+    function hbond(i, j, d, sigma, rc, G) {
+      const h = hbd[i] && HB_ACCEPTOR[el[j]] ? i : j, A = h === i ? j : i;
+      const D = bp[h * MB];
+      let ux = x[h] - x[D], uy = y[h] - y[D];
+      const L = Math.sqrt(ux * ux + uy * uy) || 1e-6;
+      ux /= L; uy /= L;
+      const vx = (x[A] - x[h]) / d, vy = (y[A] - y[h]) / d;
+      const c = ux * vx + uy * vy;
+      if (c <= 0) return;
+      const a = Math.pow(c, hbPow), da = hbPow * a / c;
+      let w = 1, dw = 0;
+      if (d > sigma) {
+        const W = rc - sigma, s = (d - sigma) / W;
+        w = (1 - s * s) * (1 - s * s); dw = -4 * s * (1 - s * s) / W;
+      }
+      // F_X = G (a dw dd/dX + w da dc/dX)
+      const ka = G * a * dw, kc = G * w * da;
+      const ax = (ux - c * vx) / d, ay = (uy - c * vy) / d; // dc/dA
+      const bx = (vx - c * ux) / L, by = (vy - c * uy) / L; // -dc/dD
+      fx[A] += ka * vx + kc * ax; fy[A] += ka * vy + kc * ay;
+      fx[h] += -ka * vx + kc * (bx - ax); fy[h] += -ka * vy + kc * (by - ay);
+      fx[D] -= kc * bx; fy[D] -= kc * by;
     }
 
     for (let cy = 0; cy < gh; cy++) {
@@ -884,6 +921,7 @@
         cs *= nc <= 0 ? 0 : nc >= 1 ? 1 : nc;
       }
       const g = P.G_GAS + (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
+      this.gAcc[i] = g;
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
       let bvx = 0, bvy = 0;
@@ -1362,7 +1400,6 @@
     else {
       const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
       eps = pairEps[p] * P.VDW_SCALE * (1 + P.MOL_POLARIZABILITY * bi) * (1 + P.MOL_POLARIZABILITY * bj);
-      if (hbs) eps += hbs * P.HB_EPS * P.KB;
     }
     let U;
     if (d < sigma) {
@@ -1372,6 +1409,7 @@
       const s = (d - sigma) / (rc - sigma);
       U = -eps * (1 - s * s) * (1 - s * s);
     }
+    if (hbs) U += this.hbondEnergy(i, j, d, sigma, rc, hbs * P.HB_EPS * P.KB);
     const qq = this.q[i] * this.q[j];
     if (qq !== 0) {
       const d0 = sigma * 0.8;
@@ -1380,6 +1418,18 @@
         : P.KC * qq * ((1 / d0 - 1 / rc + (d0 - rc) * irc2) + (d0 - d) * (1 / (d0 * d0) - irc2));
     }
     return U;
+  };
+
+  // Energy of the directional hydrogen bond between donor H and acceptor (see hbond in computeForces).
+  S.hbondEnergy = function (i, j, d, sigma, rc, G) {
+    const h = this.hbd[i] && HB_ACCEPTOR[this.el[j]] ? i : j, A = h === i ? j : i;
+    const D = this.bp[h * P.MAXB], x = this.x, y = this.y;
+    const ux = x[h] - x[D], uy = y[h] - y[D], L = Math.sqrt(ux * ux + uy * uy) || 1e-6;
+    const c = (ux * (x[A] - x[h]) + uy * (y[A] - y[h])) / (L * d);
+    if (c <= 0) return 0;
+    let w = 1;
+    if (d > sigma) { const s = (d - sigma) / (rc - sigma); w = (1 - s * s) * (1 - s * s); }
+    return -G * w * Math.pow(c, P.HB_ANGLE_POW);
   };
 
   // Non-bonded energy of a set of atoms with everything around them (pairs inside counted once).
@@ -1620,6 +1670,109 @@
     }
   };
 
+  // Looks up each small molecule's melting point (from the phase data), so frozen molecular
+  // solids are recognised as solids. Molecules change only by reactions, so this runs rarely.
+  S.updateMeltPoints = function () {
+    const n = this.n, MB = P.MAXB, el = this.el, meltT = this.meltT;
+    if (!CE.phase) return;
+    const seen = this._mpSeen && this._mpSeen.length >= n ? this._mpSeen : (this._mpSeen = new Uint8Array(P.MAX));
+    seen.fill(0, 0, n);
+    const cache = this._mpCache || (this._mpCache = new Map());
+    const mol = [];
+    for (let i = 0; i < n; i++) {
+      if (seen[i]) continue;
+      mol.length = 0; mol.push(i); seen[i] = 1;
+      for (let h = 0; h < mol.length; h++) {
+        const a = mol[h];
+        for (let k = 0; k < this.nb[a]; k++) {
+          const b = this.bp[a * MB + k];
+          if (!seen[b]) { seen[b] = 1; mol.push(b); }
+        }
+      }
+      let T = 0;
+      if (mol.length > 1 && mol.length <= 12) {
+        const counts = {};
+        for (let k = 0; k < mol.length; k++) counts[el[mol[k]]] = (counts[el[mol[k]]] || 0) + 1;
+        const sig = JSON.stringify(counts);
+        T = cache.get(sig);
+        if (T === undefined) { T = CE.phase.meltingPoint(C.describe(counts, mol.length, false).key); cache.set(sig, T); }
+      }
+      for (let k = 0; k < mol.length; k++) meltT[mol[k]] = T;
+    }
+  };
+
+  // Solid-state annealing. Like reactions, molecular rearrangement in a solid is time-compressed:
+  // every simulated moment stands for a great many real vibrations, during which molecules in a
+  // real crystal turn into their best orientation. Small molecules that are packed in a liquid
+  // or solid try a small rigid rotation, accepted with the Boltzmann (Metropolis) rule at the
+  // local temperature. That only speeds up reaching equilibrium (a cooled liquid freezes into a
+  // crystal instead of a glass); the energy change is paid from or given to the local heat.
+  S.solidAnneal = function () {
+    const n = this.n, frac = P.ANNEAL_TRIALS;
+    if (!frac || !n) return;
+    const MB = P.MAXB, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el, rng = this.rng;
+    const set = this._anSet || (this._anSet = new Int32Array(8));
+    const ox = this._anX || (this._anX = new Float64Array(16));
+    const W = P.W, H = P.H, margin = 40;
+    const trials = Math.max(1, Math.round(n * frac));
+    // fresh neighbour lists: a missed neighbour would make some moves look free, and the
+    // Metropolis rule would pick exactly those, creating energy
+    this.buildGrid();
+    for (let t = 0; t < trials; t++) {
+      const r = Math.floor(rng() * n);
+      // only frozen molecular solids: packed, and colder than their documented melting point
+      if (!this.nb[r] || this.condF[r] < 0.5 || !(this.tLoc[r] < this.meltT[r])) continue;
+      // the whole molecule, if it is small (at most 6 atoms)
+      let m = 0, big = false;
+      set[m++] = r;
+      for (let h = 0; h < m && !big; h++) {
+        const a = set[h];
+        for (let k = 0; k < this.nb[a]; k++) {
+          const b = this.bp[a * MB + k];
+          let seen = false;
+          for (let c = 0; c < m; c++) if (set[c] === b) { seen = true; break; }
+          if (seen) continue;
+          if (m >= 6) { big = true; break; }
+          set[m++] = b;
+        }
+      }
+      if (big) continue;
+      let cx = 0, cy = 0, M = 0, nearWall = false;
+      for (let a = 0; a < m; a++) {
+        const i = set[a], mi = mass[el[i]];
+        if (this.condF[i] < 0.5) { nearWall = true; break; }
+        if (x[i] < margin || x[i] > W - margin || y[i] < margin || y[i] > H - margin) { nearWall = true; break; }
+        cx += mi * x[i]; cy += mi * y[i]; M += mi;
+      }
+      if (nearWall) continue;
+      cx /= M; cy /= M;
+      const U0 = this.eventEnergy(set, m);
+      // a small turn and shift of the whole molecule
+      const th = (rng() * 2 - 1) * P.ANNEAL_ANGLE, c = Math.cos(th), sn = Math.sin(th);
+      const sx = (rng() * 2 - 1) * P.ANNEAL_SHIFT, sy = (rng() * 2 - 1) * P.ANNEAL_SHIFT;
+      let dG = 0;
+      for (let a = 0; a < m; a++) {
+        const i = set[a];
+        ox[2 * a] = x[i]; ox[2 * a + 1] = y[i];
+        const rx = x[i] - cx, ry = y[i] - cy;
+        x[i] = cx + sx + rx * c - ry * sn; y[i] = cy + sy + rx * sn + ry * c;
+        dG -= mass[el[i]] * this.gAcc[i] * (y[i] - ox[2 * a + 1]); // gravity's potential energy
+      }
+      const dU = this.eventEnergy(set, m) - U0 + dG;
+      const RT = P.KB * Math.max(this.tLoc[r], 1);
+      if (dU > 0 && rng() >= Math.exp(-dU / RT)) {
+        for (let a = 0; a < m; a++) { const i = set[a]; x[i] = ox[2 * a]; y[i] = ox[2 * a + 1]; }
+        continue;
+      }
+      // accepted: carry each atom's velocity round with it, and settle the energy change locally
+      for (let a = 0; a < m; a++) {
+        const i = set[a], vx = ox[2 * a] - px[i], vy = ox[2 * a + 1] - py[i];
+        px[i] = x[i] - (vx * c - vy * sn); py[i] = y[i] - (vx * sn + vy * c);
+      }
+      if (dU !== 0) this.heatRaw(set[0], set[1], -dU);
+    }
+  };
+
   // Mechanical failure: bonds stretched far beyond their length snap.
   S.breakStretched = function () {
     const n = this.n, MB = P.MAXB, x = this.x, y = this.y, el = this.el;
@@ -1673,7 +1826,9 @@
       if (this.substep % 4 === 0) {
         this.bondEvents(P.DT * 4);
         this.breakStretched();
+        this.solidAnneal();
       }
+      if (this.substep % 64 === 0) this.updateMeltPoints();
       this.feedGas(P.DT);
       this.time += P.DT;
       this.substep++;
