@@ -275,7 +275,7 @@
     $('add-moles').classList.toggle('active', !atomView);
     $('ro-temp').textContent = Math.round(sim.temperature) + ' K';
     const p = sim.pressureAtm;
-    $('ro-press').textContent = (p < 0.01 ? p.toExponential(1) : p < 100 ? p.toFixed(2) : p.toFixed(0)) + ' atm';
+    $('ro-press').textContent = (p > 0 && p < 0.01 ? p.toExponential(1) : p < 100 ? p.toFixed(2) : p.toFixed(0)) + ' atm';
     $('ro-atoms').textContent = sim.n.toLocaleString();
     $('ro-rx').textContent = Math.round(sim.reactionsPerSec).toLocaleString() + '/s';
   }
@@ -311,7 +311,7 @@
     last = now;
     if (state.burst && state.burst.frames > 0 && !state.paused) {
       const b = state.burst;
-      sim.spark(b.x, b.y, b.hot ? 380 : 220, b.hot ? 4000 : 80);
+      sim.spark(b.x, b.y, b.hot ? 550 : 260, b.hot ? 4000 : 80);
       if (--b.frames === 0) state.burst = null;
     }
     if (!state.paused && sim.n > 0) {

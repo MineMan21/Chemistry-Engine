@@ -40,7 +40,7 @@
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
     // attack triplet O=O (why O2 is slow with fuels and metals but fast with radicals)
-    HEAT_FRACTION: 0.6, // share of reaction enthalpy deposited as translational kinetic energy
+    HEAT_FRACTION: 0.8, // share of reaction enthalpy deposited as translational kinetic energy
     K_WALL: 110000, // soft wall stiffness (per unit mass)
     K_ANGLE: 8000, // bending spring stiffness (per unit reduced mass); bending is soft
     ACCOUNT_ANGLES: 0, // include bending energy in per-event energy accounting
@@ -702,7 +702,7 @@
         F = -4 * eps * s * (1 - s * s) / w;
         if (s < 0.25) { contacts[i]++; contacts[j]++; }
         // radicals capture partners a little before hard contact (larger reactive cross-section)
-        if (s < P.RADICAL_CAPTURE && self.nCand < maxCand && C.pairClass[p] &&
+        if (s < P.RADICAL_CAPTURE && self.nCand < maxCand && C.pairClass[p] && nb[i] <= 1 && nb[j] <= 1 &&
             (used[i] < maxVal[ei] || used[j] < maxVal[ej])) {
           self.candI[self.nCand] = i; self.candJ[self.nCand] = j; self.nCand++;
         }
@@ -804,9 +804,9 @@
         Tw = this.plateTemp; gamma = P.PLATE_GAMMA;
       }
       if (wfx !== 0 && y[i] < H / 2) impulse += Math.abs(wfx) * mass[el[i]] * dt;
-      if (this.anneal[i]) {
-        // freshly added material: remove the heat of settling / self-assembly
-        this.anneal[i]--;
+      if (this.anneal[i] && (--this.anneal[i], contacts[i] >= 1 || this.nb[i] >= 2)) {
+        // freshly added condensed material: remove the heat of settling / self-assembly with a
+        // strong thermostat (free gas atoms are skipped so they keep flying ballistically)
         Tw = P.AMBIENT; gamma = 40;
       } else if (gamma === 0 && this.convection > 0) {
         // convection: everything exchanges heat with the plate, more strongly near the bottom
@@ -841,7 +841,9 @@
       bonds += this.nb[i];
     }
     // T = sum(KE) / (KB * DOF / 2) with DOF = 2 per atom minus one per bond constraint
-    const globalT = n ? ke / Math.max(1, n - bonds / 4) : this.plateTemp;
+    // degrees of freedom: 2 per atom minus one per rigid bond, but networks keep some motion
+    const dofHalf = Math.max(0.6 * n, n - bonds / 4, 1);
+    const globalT = n ? ke / dofHalf : this.plateTemp;
     // local temperature: 3x3 blurred cell average, shrunk toward the global temperature when
     // few particles are present (one fast gas atom is not a hot spot), smoothed in time
     const N0 = P.T_PRIOR;
@@ -890,7 +892,7 @@
     }
     this.impulse += impulse;
     this._keSum = (this._keSum || 0) + ke;
-    this._keCount = (this._keCount || 0) + Math.max(1, n - bonds / 4);
+    this._keCount = (this._keCount || 0) + dofHalf;
   };
 
   // SHAKE-style distance constraint: the correction acts along the bond direction of the
@@ -923,30 +925,41 @@
     }
   };
 
-  // Moves each bond's target length toward its rest length. The atoms are moved kinematically
-  // (position and previous position together) so the change does not create velocity.
+  // Moves each bond's target length toward its rest length, then re-satisfies all bonds with a
+  // kinematic constraint pass (positions and previous positions move together), so the
+  // geometry change of a new/changed bond never turns into velocity - even in networks where
+  // many bonds ramp at once.
   S.rampBonds = function () {
     const n = this.n, MB = P.MAXB, el = this.el, bl = this.bl, ramp = P.BOND_RAMP;
-    const x = this.x, y = this.y, px = this.px, py = this.py;
+    let any = false;
     for (let i = 0; i < n; i++) {
       const base = i * MB;
       for (let k = 0; k < this.nb[i]; k++) {
-        const j = this.bp[base + k];
-        if (j < i) continue;
-        const rest = C.pairLength[(el[i] * NZ + el[j]) * 4 + this.bo[base + k]];
+        const rest = C.pairLength[(el[i] * NZ + el[this.bp[base + k]]) * 4 + this.bo[base + k]];
         const cur = bl[base + k];
         if (cur === rest) continue;
-        const next = Math.abs(cur - rest) <= ramp ? rest : cur - Math.sign(cur - rest) * ramp;
-        bl[base + k] = next;
-        const kj = this.bondSlot(j, i);
-        if (kj >= 0) bl[j * MB + kj] = next;
-        const dx = x[j] - x[i], dy = y[j] - y[i];
-        const d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
-        const wi = invMass[el[i]], wj = invMass[el[j]];
-        const sh = (d - next) / (d * (wi + wj));
-        const sxi = dx * sh * wi, syi = dy * sh * wi, sxj = dx * sh * wj, syj = dy * sh * wj;
-        x[i] += sxi; y[i] += syi; px[i] += sxi; py[i] += syi;
-        x[j] -= sxj; y[j] -= syj; px[j] -= sxj; py[j] -= syj;
+        bl[base + k] = Math.abs(cur - rest) <= ramp ? rest : cur - Math.sign(cur - rest) * ramp;
+        any = true;
+      }
+    }
+    if (!any) return;
+    const x = this.x, y = this.y, px = this.px, py = this.py;
+    for (let it = 0; it < P.SHAKE_ITERS; it++) {
+      for (let i = 0; i < n; i++) {
+        const base = i * MB;
+        for (let k = 0; k < this.nb[i]; k++) {
+          const j = this.bp[base + k];
+          if (j < i) continue;
+          const dx = x[j] - x[i], dy = y[j] - y[i];
+          const d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+          const diff = d - bl[base + k];
+          if (diff > -1e-4 && diff < 1e-4) continue;
+          const wi = invMass[el[i]], wj = invMass[el[j]];
+          const sh = diff / (d * (wi + wj));
+          const sxi = dx * sh * wi, syi = dy * sh * wi, sxj = dx * sh * wj, syj = dy * sh * wj;
+          x[i] += sxi; y[i] += syi; px[i] += sxi; py[i] += syi;
+          x[j] -= sxj; y[j] -= syj; px[j] -= sxj; py[j] -= syj;
+        }
       }
     }
   };
@@ -1216,6 +1229,8 @@
     for (let c = 0; c < this.nCand; c++) {
       const i = this.candI[c], j = this.candJ[c];
       if (i >= this.n || j >= this.n || this.isBonded(i, j)) continue;
+      // candidates were collected before this substep's events; never close a 3-membered ring
+      if (this.nb[i] && this.nb[j] && this.isOneThree(i, j)) continue;
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
       const cls = C.pairClass[p];
       if (!cls) continue;
@@ -1284,7 +1299,7 @@
       if (el[i] === el[j] && el[k] === el[l]) continue;
       const breakSum = sI + sJ;
       let formSum = E1, formKL = false;
-      if (k !== l && !this.isBonded(k, l)) {
+      if (k !== l && !this.isBonded(k, l) && !this.isOneThree(k, l)) {
         const pkl = el[k] * NZ + el[l];
         const dx = this.x[l] - this.x[k], dy = this.y[l] - this.y[k];
         const near = dx * dx + dy * dy < 2.25 * pairSigma[pkl] * pairSigma[pkl];
@@ -1386,8 +1401,8 @@
       this.computeForces();
       this.angleForces();
       this.integrate();
-      this.rampBonds();
       this.solveBonds(P.SHAKE_ITERS);
+      this.rampBonds();
       this.walls();
       this.react();
       if (this.substep % 4 === 0) {
@@ -1495,7 +1510,8 @@
       }
       s.molecules++;
       s.atoms += m.atoms.length;
-      if (m.contacts / m.atoms.length >= 1) s.condensed++;
+      // networks/lattices are solids; small molecules are condensed when packed against others
+      if (m.atoms.length > 12 || m.contacts / m.atoms.length >= 1) s.condensed++;
       m.species = s;
     });
     const molColor = this.molColor;
