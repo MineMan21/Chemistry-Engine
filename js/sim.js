@@ -58,7 +58,8 @@
     CONDUCTION: 8, // heat exchange (1/s) of liquids/solids with the plate, at the floor...
     CONDUCTION_DEPTH: 350, // ...fading over this height (units)
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
-    VALVE_HALF: 140, // half-width of the valve opening in the lid
+    VALVE_HALF: 140,
+    PUMP_RATE: 0.7, // vacuum pump: fraction of the gas removed per simulated second // half-width of the valve opening in the lid
     MAX_STEP: 6, // max displacement per substep (keeps the integrator stable)
     TCELL: 160, // size of the coarse cells used for the local temperature field
     T_PRIOR: 2,
@@ -186,6 +187,7 @@
     // controls
     this.plateTemp = P.AMBIENT;
     this.convection = P.CONVECTION;
+    this.pumpRate = P.PUMP_RATE; // vacuum pump strength (fraction of the gas removed per second)
     this.insulated = false;
     this.vacuumOn = false;
     this.canOn = false;
@@ -1534,27 +1536,89 @@
       this.impulseTime += P.DT;
       this.reactionWindowTime += P.DT;
     }
-    this.updateGauges();
+    this.updateGauges(substeps * P.DT);
   };
 
-  S.updateGauges = function () {
+  S.updateGauges = function (elapsed) {
+    if (this.vacuumOn && elapsed > 0) this.pump(elapsed);
     if (this._keCount > 0) {
       const T = this._keSum / this._keCount;
       this.temperature = this.n ? T : this.plateTemp;
       this._keSum = 0; this._keCount = 0;
     }
-    if (this.impulseTime >= 0.15) {
-      const len = P.W + P.H; // top wall + two half side walls
-      const p2d = this.impulse / (this.impulseTime * len);
-      const area = P.W * P.H;
-      const atm = p2d * area * P.MOL_PER_PARTICLE * 0.082057 / (P.KB * P.JAR_VOLUME_L);
-      this.pressureAtm = this.pressureAtm * 0.85 + atm * 0.15;
-      this.impulse = 0; this.impulseTime = 0;
-    }
+    // Pressure of the gas in the jar right now, from its contents: P = n R T / V, with n the
+    // gas-phase molecules (not part of a liquid or solid) and T from their own motion.
+    const atm = this.gasPressure();
+    this.pressureAtm = this.n ? this.pressureAtm * 0.5 + atm * 0.5 : 0;
     if (this.reactionWindowTime >= 0.5) {
       this.reactionsPerSec = this.reactionWindow / this.reactionWindowTime;
       this.reactionWindow = 0; this.reactionWindowTime = 0;
     }
+  };
+
+  // Vacuum pump: removes gas-phase molecules from the whole jar at pumpRate (fraction per
+  // simulated second), so the pressure falls exponentially like a real pumped vessel. Liquids
+  // are untouched until they evaporate (so water boils away under vacuum).
+  S.pump = function (elapsed) {
+    const n = this.n, MB = P.MAXB;
+    if (!n) return;
+    const pRemove = 1 - Math.exp(-this.pumpRate * elapsed);
+    const seen = this._pmSeen && this._pmSeen.length >= P.MAX ? this._pmSeen : (this._pmSeen = new Uint32Array(P.MAX));
+    const stamp = this._pmStamp = (this._pmStamp || 0) + 1;
+    const queue = this._pmQueue || (this._pmQueue = new Int32Array(P.MAX));
+    const doomed = [];
+    for (let i = 0; i < n; i++) {
+      if (seen[i] === stamp) continue;
+      let head = 0, tail = 0, cond = 0;
+      queue[tail++] = i; seen[i] = stamp;
+      while (head < tail) {
+        const a = queue[head++];
+        cond += this.condF[a];
+        for (let k = 0; k < this.nb[a]; k++) {
+          const b = this.bp[a * MB + k];
+          if (seen[b] !== stamp) { seen[b] = stamp; queue[tail++] = b; }
+        }
+      }
+      if (tail > 12 || cond / tail >= 0.5) continue;
+      if (this.rng() < pRemove) for (let k = 0; k < tail; k++) doomed.push(queue[k]);
+    }
+    if (!doomed.length) return;
+    doomed.sort(function (a, b) { return b - a; });
+    for (let k = 0; k < doomed.length; k++) this.removeParticle(doomed[k]);
+    this.removedMol += doomed.length * P.MOL_PER_PARTICLE;
+  };
+
+  // Instantaneous gas pressure (atm) from the jar's contents.
+  S.gasPressure = function () {
+    const n = this.n, MB = P.MAXB;
+    if (!n) return 0;
+    const seen = this._gpSeen && this._gpSeen.length >= P.MAX ? this._gpSeen : (this._gpSeen = new Uint32Array(P.MAX));
+    const stamp = this._gpStamp = (this._gpStamp || 0) + 1;
+    const queue = this._gpQueue || (this._gpQueue = new Int32Array(P.MAX));
+    const x = this.x, y = this.y, px = this.px, py = this.py, el = this.el, dt = P.DT;
+    let molecules = 0, ke = 0;
+    for (let i = 0; i < n; i++) {
+      if (seen[i] === stamp) continue;
+      // walk the molecule containing i
+      let head = 0, tail = 0, m = 0, mvx = 0, mvy = 0, cond = 0;
+      queue[tail++] = i; seen[i] = stamp;
+      while (head < tail) {
+        const a = queue[head++];
+        const ma = mass[el[a]];
+        m += ma; mvx += ma * (x[a] - px[a]); mvy += ma * (y[a] - py[a]);
+        cond += this.condF[a];
+        for (let k = 0; k < this.nb[a]; k++) {
+          const b = this.bp[a * MB + k];
+          if (seen[b] !== stamp) { seen[b] = stamp; queue[tail++] = b; }
+        }
+      }
+      if (tail > 12 || cond / tail >= 0.5) continue; // liquid, solid or network: not gas
+      molecules++;
+      ke += (mvx * mvx + mvy * mvy) / (2 * m * dt * dt); // translational KE of the molecule
+    }
+    if (!molecules) return 0;
+    const T = ke / (molecules * P.KB); // 2D: translational KE = kT per molecule
+    return molecules * P.MOL_PER_PARTICLE * 0.082057 * T / P.JAR_VOLUME_L;
   };
 
   // Local heating/cooling tool (spark igniter / cold finger). A hot spark also splits some bonds

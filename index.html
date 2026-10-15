@@ -129,6 +129,11 @@
           <button id="vacuum" class="btn toggle">Vacuum pump: off</button>
         </div>
         <div class="row">
+          <span class="label">Pump</span>
+          <input id="pump-rate" type="range" min="0" max="100" value="83" aria-label="Vacuum pump strength">
+          <output id="pump-rate-out">50%/s</output>
+        </div>
+        <div class="row">
           <button id="can" class="btn toggle">Gas can: shut</button>
           <select id="can-gas" aria-label="Gas in the can">
             <option value="N2">N₂</option>

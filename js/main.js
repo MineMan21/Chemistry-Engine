@@ -142,6 +142,14 @@
     if (sim.canOn) sim.vacuumOn = false;
     refreshPressureButtons();
   });
+  // pump strength: logarithmic from a gentle 2%/s to a hard 95%/s of the gas removed per second
+  function setPump(v) {
+    const frac = 0.02 * Math.pow(0.95 / 0.02, v / 100);
+    sim.pumpRate = -Math.log(1 - frac);
+    $('pump-rate-out').textContent = Math.round(frac * 100) + '%/s';
+  }
+  $('pump-rate').addEventListener('input', function (e) { setPump(+e.target.value); });
+  setPump(+$('pump-rate').value);
   $('can-gas').addEventListener('change', function (e) { sim.canGas = e.target.value; });
   $('can-rate').addEventListener('input', function (e) {
     sim.canRate = +e.target.value;
