@@ -19,6 +19,7 @@
     speed: 1,
     natural: true,
     pinned: -1, // atom whose molecule is pinned in the inspector
+    focusKey: null, // species picked in Contents: all its molecules are highlighted
     hover: -1,
     mouse: null, // {x, y} in screen px
     msPerSub: 1,
@@ -166,6 +167,7 @@
   $('clear').addEventListener('click', function () {
     sim.clear();
     state.pinned = -1;
+    state.focusKey = null;
     sim.analyze();
     refreshContents();
   });
@@ -218,6 +220,7 @@
     if (!p) return;
     sim.clear();
     state.pinned = -1;
+    state.focusKey = null;
     sim.vacuumOn = sim.canOn = false;
     refreshPressureButtons();
     p.run();
@@ -358,13 +361,28 @@
     else if (e.key === '-' || e.key === '_') renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1 / 1.4);
     else if (e.key === 'f' || e.key === 'F') renderer.fit();
     else if ((e.key === 's' || e.key === 'S') && state.pinned >= 0) savePinned();
+    else if (e.key === 'Escape' && state.focusKey) { state.focusKey = null; refreshContents(); }
   });
 
   // ------------------------------------------------------------------ panels
   function refreshContents() {
+    // a highlighted species that is all gone (reacted, pumped out) stops being highlighted
+    if (state.focusKey && !sim.species.some(function (s) { return s.key === state.focusKey; })) state.focusKey = null;
     CE.UI.renderContents($('contents'), sim.species, function (sp) {
-      if (sp.first < sim.n) { state.pinned = sp.first; setTool('inspect'); }
-    });
+      state.focusKey = state.focusKey === sp.key ? null : sp.key;
+      refreshContents();
+      if (state.focusKey) toast('Highlighting every ' + sp.formula + (sp.name ? ' (' + sp.name + ')' : '') + ' in the jar. Click it again to clear.');
+    }, state.focusKey);
+  }
+
+  // Per-atom mask of the highlighted species, from the species index of the last analysis.
+  function updateFocus() {
+    const k = state.focusKey ? sim.species.findIndex(function (s) { return s.key === state.focusKey; }) : -1;
+    if (k < 0 || !sim.spIdx) { renderer.focus = null; return; }
+    const mask = state.focusMask || (state.focusMask = new Uint8Array(P.MAX));
+    const sp = sim.spIdx;
+    for (let i = 0; i < sim.n; i++) mask[i] = sp[i] === k ? 1 : 0;
+    renderer.focus = mask;
   }
 
   function updateModeUI() {
@@ -431,6 +449,7 @@
       sim.analyze();
       if (state.frame % 30 === 0) refreshContents();
     }
+    updateFocus();
     renderer.draw(dt);
     updateModeUI();
     updateInspector();
