@@ -123,10 +123,23 @@
     $('plate').value = tToSlider(sim.plateTemp);
     $('plate-out').textContent = Math.round(sim.plateTemp) + ' K (' + Math.round(sim.plateTemp - 273.15) + ' °C)';
   }
-  $('plate').addEventListener('input', function (e) { setPlate(sliderToT(+e.target.value)); });
+  $('plate').addEventListener('input', function (e) { program = null; setPlate(sliderToT(+e.target.value)); });
   document.querySelectorAll('#plate-presets button').forEach(function (b) {
-    b.addEventListener('click', function () { setPlate(+b.dataset.t); });
+    b.addEventListener('click', function () { program = null; setPlate(+b.dataset.t); });
   });
+
+  // A plate program for experiments: stages of { T, sec, text } run in simulated time (so a slow
+  // computer just takes longer). Touching the plate control cancels it.
+  let program = null;
+  function runProgram(stages) { program = { stages: stages, i: -1, until: 0 }; nextStage(); }
+  function nextStage() {
+    const p = program;
+    if (++p.i >= p.stages.length) { program = null; return; }
+    const st = p.stages[p.i];
+    setPlate(st.T);
+    if (st.text) toast(st.text);
+    p.until = st.sec ? sim.time + st.sec : Infinity;
+  }
   $('insulated').addEventListener('change', function (e) { sim.insulated = e.target.checked; });
 
   function refreshPressureButtons() {
@@ -169,6 +182,7 @@
   $('color-mode').addEventListener('change', function (e) { renderer.colorMode = e.target.value; });
   $('clear').addEventListener('click', function () {
     sim.clear();
+    program = null;
     state.pinned = -1;
     state.focusKey = null;
     sim.analyze();
@@ -216,12 +230,34 @@
     noble: { text: 'Helium, neon and argon never bond. Cool them down: argon liquefies near 87 K.', run: function () {
       setPlate(293); sim.addMoles(2, 0.5, P.W / 2, P.H * 0.3); sim.addMoles(10, 0.5, P.W / 2, P.H * 0.5); sim.addMoles(18, 0.5, P.W / 2, P.H * 0.7); } },
     nitrogen: { text: 'Nitrogen below its 77 K boiling point condenses into a liquid at the bottom.', run: function () {
-      setPlate(60); sim.addMoles(7, 1, P.W / 2, P.H * 0.5); } }
+      setPlate(60); sim.addMoles(7, 1, P.W / 2, P.H * 0.5); } },
+    ice: { text: 'Liquid water on a 200 K plate freezes into ice Ih. Zoom in on the solid to see its hexagonal rings.', run: function () {
+      sim.addMolecules(TEMPLATES.H2O, 900, P.W / 2, P.H - 260, { x: 420, y: 220 });
+      runProgram([
+        { T: 293, sec: 3 },
+        { T: 200, sec: 0, text: 'Plate at 200 K: the water freezes from the cold floor and glass up. Ice is an open honeycomb of hydrogen bonds, so the solid takes up about 9% more room than the liquid. Set the plate above 273 K to melt it again.' }
+      ]); } },
+    iron: { text: 'An iron lump on a 2100 K plate melts (iron melts at 1811 K); then the plate goes cold and the melt solidifies into close-packed crystal grains.', run: function () {
+      sim.addMoles(26, 0.5, P.W / 2, P.H - 150);
+      runProgram([
+        { T: 293, sec: 2 },
+        { T: 2100, sec: 14, text: 'Plate at 2100 K: the iron heats past 1811 K and melts into a liquid that flows across the plate.' },
+        { T: 293, sec: 0, text: 'Plate back to 293 K: the molten iron cools, crystal grains nucleate on the cold plate and the metal hardens.' }
+      ]); } },
+    gallium: { text: 'Gallium melts at just 303 K (it melts in your hand). The 340 K plate melts it; then the plate cools it to 250 K and it freezes.', run: function () {
+      sim.addMoles(31, 0.5, P.W / 2, P.H - 150);
+      runProgram([
+        { T: 293, sec: 3 },
+        { T: 340, sec: 12, text: 'Plate at 340 K, just above gallium\'s 303 K melting point: the solid slumps into a liquid.' },
+        { T: 250, sec: 0, text: 'Plate at 250 K: the liquid gallium freezes again.' }
+      ]); } }
   };
   $('preset-go').addEventListener('click', function () {
     const p = PRESETS[$('preset').value];
     if (!p) return;
     sim.clear();
+    program = null;
+    setPlate(293);
     state.pinned = -1;
     state.focusKey = null;
     sim.vacuumOn = sim.canOn = false;
@@ -512,6 +548,7 @@
       sim.spark(b.x, b.y, b.hot ? 550 : 260, b.hot ? 4000 : 80);
       if (--b.frames === 0) state.burst = null;
     }
+    if (program && sim.time >= program.until) nextStage();
     if (!state.paused && sim.n > 0) {
       // adaptive sub-stepping: spend ~9 ms per frame on physics (scaled by the speed setting)
       const budget = 12 * state.speed;

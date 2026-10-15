@@ -54,7 +54,10 @@ npm test
 
 The **Experiments** menu loads ready-made setups: hydrogen + oxygen, sodium + chlorine, a blob
 of water dropped from mid-air, steam on cold glass, methane + oxygen, iron in hot oxygen, carbon +
-oxygen, noble gases and liquid nitrogen.
+oxygen, noble gases and liquid nitrogen, plus three textbook phase-change experiments that run
+the hot plate through a program: freezing water into hexagonal ice, melting an iron lump at
+2100 K and recasting it as it cools, and melting gallium just above room temperature. Touching
+the plate control takes over from the program.
 
 ## Scale
 
@@ -71,8 +74,8 @@ Exact quantum chemistry for every combination of 118 elements is not computable 
 so the engine uses rules driven by real element data (`js/elements.js`: mass, Pauling
 electronegativity, covalent radius, common valences, melting and boiling points).
 
-- **Bond type.** Two metals do not form discrete bonds; they attract each other with metallic
-  cohesion scaled to the metal's boiling point. A metal with an electronegativity gap of at
+- **Bond type.** Two metals do not form discrete bonds; they hold together by metallic
+  cohesion (see Phases below). A metal with an electronegativity gap of at
   least 1.7 forms ionic bonds. Everything else bonds covalently. Noble gases only bond to more
   electronegative partners when they have valences beyond 0 (Xe, Kr, Rn).
 - **Valence.** Each element has allowed valences. Going beyond the normal one (for example
@@ -108,7 +111,26 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   off above about 373 K, Br₂ is liquid, I₂ and metals are solid, and N₂, O₂, Cl₂ and Ar are gases
   that condense near their real boiling points. Hydrogen bonds are directional: strongest when the
   O–H points straight at the neighbouring O, which is what lets water freeze into an ordered,
-  open lattice rather than a dense heap.
+  open lattice rather than a dense heap. Water oxygens also feel a three-body term after the
+  coarse-grained mW water model (Molinero & Moore, 2009) that prefers 120° O–O–O angles, the
+  hexagonal rings of ice Ih seen down its c axis, plus a weak two-body pull that lets the liquid
+  pack a little closer than the open ice.
+- **Metallic cohesion** has two parts. A pair well scaled to the metal's melting point sets when
+  the close-packed solid melts. A many-body embedding term (in the spirit of Finnis–Sinclair and
+  embedded-atom models) rewards each atom for sitting inside dense metal, however that metal is
+  packed: crystal and melt gain the same, so it leaves the melting point alone, but a lone atom,
+  a small cluster or a froth gains nothing. That is what keeps a liquid metal together far above
+  its melting point; a pair well alone would boil a 2D metal almost as soon as it melted. Iron
+  melts near 1800 K and stays a liquid with almost no vapour to about 2600 K; gallium melts just
+  above 303 K and mercury is liquid at room temperature.
+- **Crystal engine.** Freezing is a nucleation-and-growth process: below its melting point a
+  substance that crystallises (water, free metal atoms) starts crystal grains, readily on the cold
+  glass and floor and rarely in the bulk, and the grains grow as neighbours join. Each grain keeps
+  an ideal lattice (the honeycomb of ice, the close-packed layer of a metal) fitted to its members
+  by a best-fit rotation and shift (shape matching), and gentle conservative spring forces pull
+  members toward their sites. Every join, leave and spring is energy-accounted, and members
+  melt off again when heated past the melting point. Ice grains are spaced so that ice takes up
+  about 7% more room than the liquid (real ice: 9%), so water swells as it freezes.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
   solid (below its documented melting point) also make occasional small trial turns and shifts,
@@ -147,6 +169,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   isomers with the same formula and radioactive decay are not modelled.
 - Superheavy elements have estimated electronegativities (from the element above them) and
   predicted or unknown melting and boiling points.
+- Metal cohesion is calibrated on the melting point, so metals boil in the right order but
+  low-melting metals boil too early (gallium well below its real 2477 K), and a molten metal
+  shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

@@ -29,11 +29,44 @@
     MOL_POLARIZABILITY: 0, // (disabled) per-bond dispersion boost; it made bonding exothermic
     HB_EPS: 1100, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker
     HB_ANGLE_POW: 2, // directionality of hydrogen bonds: strength ~ cos^n of the D-H...A bend
+    HB_ACCEPT_POW: 2, // ...and of the acceptor side: along the lone pair of a two-bonded O/N/F
+    HB_FLAT_LO: 0.6, HB_FLAT_HI: 1.15, // (see HB_FLAT_* note below)
+    HH_CONTACT: 0.65, // H...H contact of two O-H/N-H/F-H hydrogens (they overlap in a flattened view)
+    W3_EPS: 2000, // water network angle stiffness (K), see waterAngle()
+    W2_EPS: 1000, // two-body cohesion (K) between neighbouring water oxygens, as in mW water
+    W3_RANGE: 40, // ...its range (units)...
+    W3_INNER: 32, // ...full strength out to here, past the hydrogen-bonded O...O distance (~28)
+    W2_RANGE: 40, // range of the two-body cohesion...
+    W2_INNER: 32, // ...and where it starts to fade
+    HB_REP_SCALE: 1, // stiffness of the H...acceptor contact relative to other contacts
     HB_CONTACT: 0.78, // hydrogen-bonded H...X pairs may approach to this fraction of contact
     ANNEAL_TRIALS: 0.2, // solid-state annealing: move trials per atom every 4 substeps...
     ANNEAL_ANGLE: 0.5, // ...turning a molecule by up to this many radians...
     ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
-    METAL_EPS_PER_BP: 1.05, // metallic cohesion well depth (K) per K of boiling point
+    ICE_A: 31, // O-O spacing of the ice honeycomb: wide enough that ice takes ~7% more room than the liquid (real: 9%)
+    CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites
+    CRYSTAL_TRIES: 0.3, // join/nucleation attempts per atom every 4 substeps
+    CRYSTAL_JOIN_MAX: 250, // a unit joins only if its new spring is strained by at most this (K)
+    CRYSTAL_HYST: 20, // members melt this far (K) above the melting point
+    CRYSTAL_NUC_GLASS: 0.02, // chance per attempt that cold material on the glass starts a crystal
+    CRYSTAL_NUC_BULK: 0.0001, // ...and in the bulk
+    CRYSTAL_GLASS_RANGE: 45, // "on the glass": this close to a wall or the floor
+    CRYSTAL_MAX_GRAINS: 40,
+    CRYSTAL_MAX_MEMBERS: 4000,
+    // Metallic cohesion has two parts. A pair well, METAL_EPS_PER_MP K per K of melting point,
+    // sets the melting point. A many-body embedding, -C smoothstep((rho - RHO_A) / (RHO_B - RHO_A))
+    // with rho counting an atom's metal neighbours, rewards being inside dense metal however it is
+    // packed: crystal and melt gain the same, so it leaves melting alone, but a lone atom, a small
+    // cluster or a froth gains nothing. That is the cohesion that keeps real liquid metals together
+    // far above their melting points (the wide liquid range a pair well cannot give, least of all
+    // in two dimensions). C = METAL_DENSE_PER_MP K per K of melting point, at most 3 K per K of
+    // boiling point. Calibrated on iron: melts at ~1800 K, under 1% vapour up to ~2600 K
+    METAL_EPS_PER_MP: 1.45,
+    METAL_DENSE_PER_MP: 5.2,
+    METAL_RHO_A: 1,
+    METAL_RHO_B: 3.5,
+    METAL_RC_FACTOR: 1.45, // reach of metal-metal attraction, in contact distances
+    METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
     G_SOLID: 110, // gentler settling for solids, so a lump keeps its shape instead of being
@@ -54,6 +87,7 @@
     HEAT_FRACTION: 0.8, // share of reaction enthalpy deposited as translational kinetic energy
     K_WALL: 110000, // soft wall stiffness (per unit mass)
     K_ANGLE: 8000, // bending spring stiffness (per unit reduced mass); bending is soft
+    K_ANGLE_2: 8000, // ...for two-bond centres (water's H-O-H): real ones are stiff
     ACCOUNT_ANGLES: 0, // include bending energy in per-event energy accounting
     PLATE_GAMMA: 80, // Langevin coupling (1/s) of atoms near the hot plate
     PLATE_ZONE: 60, // thickness of the layer above the plate that exchanges heat with it
@@ -87,15 +121,23 @@
 
   // Hydrogen-bond acceptor strength (N, O, F lone pairs)
   const HB_ACCEPTOR = new Float32Array(119);
+  // |u1 + u2| of an acceptor's two bond directions below which its lone pairs count as pointing
+  // out of the plane (bonds opened past ~145 degrees), and above which they are fully in plane (~110)
+  let HB_FLAT_LO = 0.6, HB_FLAT_HI = 1.15;
   HB_ACCEPTOR[7] = 0.7; HB_ACCEPTOR[8] = 1.0; HB_ACCEPTOR[9] = 1.3;
 
   // Per-element constants
   const mass = new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
   const en = new Float32Array(NZ), maxVal = new Uint8Array(NZ), normVal = new Uint8Array(NZ);
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
-  const elColor = new Uint32Array(NZ);
+  const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ);
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   const meltK = new Float32Array(NZ); // melting point (K)
+  const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ);
+  const pairEps = new Float32Array(NZ * NZ), pairMetalEps = new Float32Array(NZ * NZ);
+  // (re)builds the per-element and pair tables from P; tests and tuning scripts call it again
+  // after changing parameters
+  function buildTables() {
   for (let z = 1; z < NZ; z++) {
     const e = E[z];
     // Dynamical mass. Hydrogen is made heavier (a standard molecular-dynamics trick) so its
@@ -108,24 +150,30 @@
     normVal[z] = e.normalValence;
     isMetal[z] = e.isMetal ? 1 : 0;
     vdwEps[z] = e.vdwEps;
-    metalEps[z] = e.isMetal ? P.METAL_EPS_PER_BP * (e.bp || (e.mp ? e.mp * 2.5 : 3000)) : 0;
+    metalEps[z] = e.isMetal ? P.METAL_EPS_PER_MP * (e.mp || 1000) : 0;
+    metalA[z] = e.isMetal ? Math.min(P.METAL_DENSE_PER_MP * (e.mp || 1000), 3 * (e.bp || 3000)) * P.KB : 0;
+    // the settling force on a free metal atom, scaled down for heavy, weakly bound metals (it is
+    // proportional to mass), so that it never squeezes liquid mercury or gallium into a crystal
+    metalG[z] = e.isMetal ? Math.min(1, metalEps[z] / mass[z] / P.METAL_G_REF) : 1;
     elColor[z] = packColor(e.color);
     meltK[z] = e.mp || 1000;
     // metals (mercury!) barely wet glass; everything else feels a fraction of its dispersion
     wallAdh[z] = e.isMetal ? 20 : P.WALL_ADH_SCALE * e.vdwEps * P.VDW_SCALE;
   }
   // Pair tables
-  const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ);
-  const pairEps = new Float32Array(NZ * NZ), pairMetalEps = new Float32Array(NZ * NZ);
   for (let a = 1; a < NZ; a++) {
     for (let b = 1; b < NZ; b++) {
       const p = a * NZ + b;
       pairSigma[p] = radius[a] + radius[b];
-      pairRc[p] = pairSigma[p] * P.RC_FACTOR;
+      // metallic attraction reaches further: a longer-ranged attraction gives a wide liquid range
+      // (a short one sublimes the solid almost as soon as it melts, especially in two dimensions)
+      pairRc[p] = pairSigma[p] * (isMetal[a] && isMetal[b] ? P.METAL_RC_FACTOR : P.RC_FACTOR);
       pairEps[p] = Math.sqrt(vdwEps[a] * vdwEps[b]) * P.KB;
       pairMetalEps[p] = Math.sqrt(metalEps[a] * metalEps[b]) * P.KB;
     }
   }
+  }
+  buildTables();
 
   function packColor(hex) {
     const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
@@ -173,6 +221,13 @@
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
+    this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
+    this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
+    this.fsP = new Float64Array(M); // minus the derivative of its embedding energy
+    this.fsI = new Int32Array(8 * M); this.fsJ = new Int32Array(8 * M);
+    this.fsD = new Float64Array(16 * M); // metal pairs inside the density range: i, j, dphi/dr * (dx, dy)/d
+    this.mark = new Int32Array(M); this.markTag = 0;
+    this.grains = []; // crystal grains, see the crystal engine below
     this.batch = 0;
     this.molColor = new Uint32Array(M);
     // spatial grid
@@ -221,6 +276,7 @@
 
   const S = Simulation.prototype;
   Simulation.params = P;
+  Simulation.buildTables = buildTables;
   Simulation.ENERGY_PER_KJ = ENERGY_PER_KJ;
   Simulation.elColor = elColor;
   Simulation.packColor = packColor;
@@ -239,7 +295,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0;
     this.anneal[i] = P.ANNEAL_STEPS;
-    this.meltT[i] = 0; this.gAcc[i] = 0;
+    this.meltT[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -439,6 +495,7 @@
 
   S.clear = function () {
     this.n = 0;
+    this.grains = [];
     this.tCell.fill(this.plateTemp);
     this.cellDebt.fill(0);
     this.present.fill(0);
@@ -448,6 +505,7 @@
   // Removes particle i (breaking its bonds) by swapping the last particle into its slot.
   S.removeParticle = function (i) {
     const MB = P.MAXB;
+    if (this.grainOf[i] >= 0) this.crystalEject(i);
     this._removing = true;
     while (this.nb[i] > 0) {
       const j = this.bp[i * MB];
@@ -467,6 +525,9 @@
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
     this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.gAcc[i] = this.gAcc[last];
+    this.grainOf[i] = this.grainOf[last];
+    if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
+    this.grainOf[last] = -1;
     this.fresh[i] = this.fresh[last]; this.eRef[i] = this.eRef[last];
     for (let k = 0; k < GS; k++) {
       const g = this.ghost[last * GS + k];
@@ -600,6 +661,7 @@
   };
 
   S.markFresh = function (i) {
+    if (this.grainOf[i] >= 0 && !this._crystalBusy) this.crystalEject(i);
     if (!this.fresh[i]) {
       const vx = (this.x[i] - this.px[i]) / P.DT, vy = (this.y[i] - this.py[i]) / P.DT;
       const ke = 0.5 * mass[this.el[i]] * (vx * vx + vy * vy);
@@ -643,6 +705,8 @@
   // networks (chains/rings/lattices of multiply bonded atoms) are; molecular liquids are not.
   S.isSolidAtom = function (i) {
     const z = this.el[i], nb = this.nb[i];
+    if (this.grainOf[i] >= 0) return true; // part of a crystal
+    if (this.nb[i] === 1 && this.grainOf[this.bp[i * P.MAXB]] >= 0) return true; // ...its H
     // a molecular solid (ice, dry ice, solid iodine...) below its documented melting point
     if (this.meltT[i] && this.tLoc[i] < this.meltT[i] && this.condF[i] > 0.5) return true;
     if (isMetal[z] && nb === 0) return this.tLoc[i] < meltK[z];
@@ -715,10 +779,12 @@
   };
 
   // Calls fn(j) for particles within radius r of (x, y).
+  // Particles move a little between grid rebuilds, so the cells scanned reach a margin beyond r
+  // (a missed neighbour would make energy bookkeeping, and Metropolis moves, quietly wrong).
   S.query = function (x, y, r, fn) {
-    const cs = this.cellSize, gw = this.gridW, gh = this.gridH;
-    const x0 = Math.max(0, Math.floor((x - r) / cs)), x1 = Math.min(gw - 1, Math.floor((x + r) / cs));
-    const y0 = Math.max(0, Math.floor((y - r) / cs)), y1 = Math.min(gh - 1, Math.floor((y + r) / cs));
+    const cs = this.cellSize, gw = this.gridW, gh = this.gridH, rm = r + 10;
+    const x0 = Math.max(0, Math.floor((x - rm) / cs)), x1 = Math.min(gw - 1, Math.floor((x + rm) / cs));
+    const y0 = Math.max(0, Math.floor((y - rm) / cs)), y1 = Math.min(gh - 1, Math.floor((y + rm) / cs));
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const c = cy * gw + cx;
@@ -750,9 +816,12 @@
     contacts.fill(0, 0, n);
     this.nCand = 0;
     const maxCand = this.candI.length;
-    const vdwScale = P.VDW_SCALE, metalScale = 1;
+    const vdwScale = P.VDW_SCALE;
     const molPol = P.MOL_POLARIZABILITY, hbEps = P.HB_EPS * P.KB, hbd = this.hbd;
     const self = this;
+    const rho = this.rho, fsI = this.fsI, fsJ = this.fsJ, fsD = this.fsD, fsMax = fsI.length;
+    rho.fill(0, 0, n);
+    let nFs = 0;
 
     function pair(i, j) {
       const dx = x[j] - x[i], dy = y[j] - y[i];
@@ -775,14 +844,28 @@
       // hydrogen bond: donor H and acceptor N/O/F may approach closer and attract strongly
       const hbs = hbd[i] ? HB_ACCEPTOR[ej] : hbd[j] ? HB_ACCEPTOR[ei] : 0;
       if (hbs) sigma *= P.HB_CONTACT;
+      else if (hbd[i] && hbd[j]) sigma *= P.HH_CONTACT;
       if ((ghostT[i] || ghostT[j]) && self.isGhost(i, j)) {
         if (d < sigma) return;
         self.clearGhost(i, j);
       }
+      const fm = isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j];
+      if (fm) {
+        // metallic density phi(d): 1 in contact, fading as (1 - s^2)^2 out to the cutoff
+        if (d <= sigma) { rho[i]++; rho[j]++; }
+        else {
+          const w = rc - sigma, s = (d - sigma) / w, t = 1 - s * s;
+          rho[i] += t * t; rho[j] += t * t;
+          if (nFs < fsMax) {
+            const dphi = -4 * s * t / w / d;
+            fsI[nFs] = i; fsJ[nFs] = j; fsD[2 * nFs] = dphi * dx; fsD[2 * nFs + 1] = dphi * dy; nFs++;
+          }
+        }
+      }
       let F = 0; // positive = repulsive
       if (d < sigma) {
         const mu = mass[ei] * mass[ej] / (mass[ei] + mass[ej]);
-        F = P.K_REP * mu * (sigma - d);
+        F = (hbs ? P.HB_REP_SCALE : 1) * P.K_REP * mu * (sigma - d);
         contacts[i]++; contacts[j]++;
         if (self.nCand < maxCand && C.pairClass[p]) {
           self.candI[self.nCand] = i; self.candJ[self.nCand] = j; self.nCand++;
@@ -790,7 +873,7 @@
       } else {
         const w = rc - sigma, s = (d - sigma) / w;
         let eps;
-        if (isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j]) eps = pairMetalEps[p] * metalScale;
+        if (fm) eps = pairMetalEps[p];
         else {
           const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
           eps = pairEps[p] * vdwScale * (1 + molPol * bi) * (1 + molPol * bj);
@@ -819,7 +902,8 @@
     // Directional hydrogen bond D-H...A: strongest when the H points straight at the acceptor,
     // U = -G w(d) a(cos), with w the usual well shape in the H...A distance and a = cos^m of the
     // angle between D->H and H->A. This is what builds open, ordered ice instead of a dense heap.
-    const hbPow = P.HB_ANGLE_POW;
+    const hbPow = P.HB_ANGLE_POW, accPow = P.HB_ACCEPT_POW;
+    HB_FLAT_LO = P.HB_FLAT_LO; HB_FLAT_HI = P.HB_FLAT_HI;
     function hbond(i, j, d, sigma, rc, G) {
       const h = hbd[i] && HB_ACCEPTOR[el[j]] ? i : j, A = h === i ? j : i;
       const D = bp[h * MB];
@@ -830,18 +914,59 @@
       const c = ux * vx + uy * vy;
       if (c <= 0) return;
       const a = Math.pow(c, hbPow), da = hbPow * a / c;
+      // acceptor side: an acceptor with two bonds (the O of water, alcohols, ethers) takes the H
+      // along its lone-pair direction l, opposite the bisector of its bonds. A molecule seen
+      // flattened (its bonds opened wide, as a tilted molecule looks from above) has its lone
+      // pairs pointing out of the plane and accepts from any side: lam blends the two.
+      let b = 1, q = 0, N1 = -1, N2 = -1, lx = 0, ly = 0, S = 0, u1x = 0, u1y = 0, u2x = 0, u2y = 0, L1 = 1, L2 = 1;
+      let dbq = 0, dbS = 0;
+      if (nb[A] === 2 && accPow) {
+        N1 = bp[A * MB]; N2 = bp[A * MB + 1];
+        u1x = x[N1] - x[A]; u1y = y[N1] - y[A]; L1 = Math.sqrt(u1x * u1x + u1y * u1y) || 1e-6; u1x /= L1; u1y /= L1;
+        u2x = x[N2] - x[A]; u2y = y[N2] - y[A]; L2 = Math.sqrt(u2x * u2x + u2y * u2y) || 1e-6; u2x /= L2; u2y /= L2;
+        const sx = u1x + u2x, sy = u1y + u2y;
+        S = Math.sqrt(sx * sx + sy * sy);
+        const t = (S - HB_FLAT_LO) / (HB_FLAT_HI - HB_FLAT_LO);
+        if (t <= 0) N1 = -1; // fully flattened: an isotropic acceptor
+        else {
+          const tc = t >= 1 ? 1 : t, lam = tc * tc * (3 - 2 * tc);
+          const dlam = t >= 1 ? 0 : 6 * tc * (1 - tc) / (HB_FLAT_HI - HB_FLAT_LO);
+          lx = -sx / S; ly = -sy / S;
+          q = -(lx * vx + ly * vy); // cos between l and A->H (= -v)
+          const qn = q > 0 ? Math.pow(q, accPow) : 0;
+          b = 1 - lam + lam * qn;
+          if (b <= 0) return;
+          dbq = q > 0 ? lam * accPow * qn / q : 0;
+          dbS = dlam * (qn - 1);
+        }
+      }
       let w = 1, dw = 0;
       if (d > sigma) {
         const W = rc - sigma, s = (d - sigma) / W;
         w = (1 - s * s) * (1 - s * s); dw = -4 * s * (1 - s * s) / W;
       }
-      // F_X = G (a dw dd/dX + w da dc/dX)
-      const ka = G * a * dw, kc = G * w * da;
+      // U = -G w a b; F_X = G (a b dw dd/dX + w b da dc/dX + w a db dq/dX)
+      const ka = G * a * b * dw, kc = G * w * b * da;
       const ax = (ux - c * vx) / d, ay = (uy - c * vy) / d; // dc/dA
       const bx = (vx - c * ux) / L, by = (vy - c * uy) / L; // -dc/dD
       fx[A] += ka * vx + kc * ax; fy[A] += ka * vy + kc * ay;
       fx[h] += -ka * vx + kc * (bx - ax); fy[h] += -ka * vy + kc * (by - ay);
       fx[D] -= kc * bx; fy[D] -= kc * by;
+      if (N1 >= 0) {
+        const kq = G * w * a * dbq, kS = G * w * a * dbS;
+        // with e = A->H unit vector (= -v): dq/dH = (l - q e)/d, dq/dA gets the opposite of that
+        const hx = kq * (lx + q * vx) / d, hy = kq * (ly + q * vy) / d;
+        // through the bond directions s = u1 + u2: dq/ds = -(e - q l)/S and dS/ds = s/S = -l;
+        // d/dN = (g - (u.g)u)/L for a gradient g with respect to s
+        const gx = kq * (vx + q * lx) / S - kS * lx, gy = kq * (vy + q * ly) / S - kS * ly;
+        const g1 = u1x * gx + u1y * gy, g2 = u2x * gx + u2y * gy;
+        const n1x = (gx - g1 * u1x) / L1, n1y = (gy - g1 * u1y) / L1;
+        const n2x = (gx - g2 * u2x) / L2, n2y = (gy - g2 * u2y) / L2;
+        fx[h] += hx; fy[h] += hy;
+        fx[A] += -hx - n1x - n2x; fy[A] += -hy - n1y - n2y;
+        fx[N1] += n1x; fy[N1] += n1y;
+        fx[N2] += n2x; fy[N2] += n2y;
+      }
     }
 
     for (let cy = 0; cy < gh; cy++) {
@@ -863,6 +988,20 @@
         }
       }
     }
+    if (nFs) {
+      // embedding forces: U = sum F_i(rho_i); on the pair i, j the force is
+      // -(F'_i + F'_j) dphi/dr along the pair
+      const fsP = this.fsP;
+      for (let i = 0; i < n; i++) fsP[i] = rho[i] > 0 ? -embedD(el[i], rho[i]) : 0;
+      for (let k = 0; k < nFs; k++) {
+        const i = fsI[k], j = fsJ[k], c = fsP[i] + fsP[j];
+        const gx = c * fsD[2 * k], gy = c * fsD[2 * k + 1];
+        fx[j] += gx; fy[j] += gy;
+        fx[i] -= gx; fy[i] -= gy;
+      }
+    }
+    if (P.W3_EPS || P.W2_EPS) for (let i = 0; i < n; i++) if (this.isWaterO(i)) this.waterAngle(i, true);
+    if (this.grains.length) this.crystalForces();
   };
 
   // ---------------------------------------------------------------------------------------
@@ -920,7 +1059,9 @@
         const nc = (cndN[tcy * tgw + tcx] - P.SETTLE_MIN) / P.SETTLE_RANGE;
         cs *= nc <= 0 ? 0 : nc >= 1 ? 1 : nc;
       }
-      const g = P.G_GAS + (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
+      let g = (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
+      if (this.nb[i] === 0) g *= metalG[el[i]];
+      g += P.G_GAS;
       this.gAcc[i] = g;
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
@@ -1212,11 +1353,11 @@
     const angs = this._angs || (this._angs = new Float64Array(MB));
     const ids = this._ids || (this._ids = new Int32Array(MB));
     const K = P.K_ANGLE;
-    function spring(a, b, target) {
+    function spring(a, b, target, k) {
       const dx = x[b] - x[a], dy = y[b] - y[a];
       const d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
       const ma = mass[el[a]], mb = mass[el[b]];
-      const F = K * (ma * mb / (ma + mb)) * (d - target) / d;
+      const F = (k || K) * (ma * mb / (ma + mb)) * (d - target) / d;
       fx[a] += F * dx; fy[a] += F * dy;
       fx[b] -= F * dx; fy[b] -= F * dy;
     }
@@ -1227,7 +1368,7 @@
       if (m === 2) {
         const theta = angleFor(ec, this.used[c]);
         const la = this.bl[base], lb = this.bl[base + 1];
-        spring(this.bp[base], this.bp[base + 1], Math.sqrt(la * la + lb * lb - 2 * la * lb * Math.cos(theta)));
+        spring(this.bp[base], this.bp[base + 1], Math.sqrt(la * la + lb * lb - 2 * la * lb * Math.cos(theta)), P.K_ANGLE_2);
         continue;
       }
       // sort neighbours by angle around the centre, spring consecutive pairs to 360/m
@@ -1394,6 +1535,7 @@
     let sigma = pairSigma[p];
     const hbs = this.hbd[i] ? HB_ACCEPTOR[ej] : this.hbd[j] ? HB_ACCEPTOR[ei] : 0;
     if (hbs) sigma *= P.HB_CONTACT;
+    else if (this.hbd[i] && this.hbd[j]) sigma *= P.HH_CONTACT;
     if ((this.ghostT[i] || this.ghostT[j]) && this.isGhost(i, j) && d < sigma) return 0;
     let eps;
     if (isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j]) eps = pairMetalEps[p];
@@ -1404,7 +1546,7 @@
     let U;
     if (d < sigma) {
       const mu = mass[ei] * mass[ej] / (mass[ei] + mass[ej]);
-      U = -eps + 0.5 * P.K_REP * mu * (sigma - d) * (sigma - d);
+      U = -eps + 0.5 * (hbs ? P.HB_REP_SCALE : 1) * P.K_REP * mu * (sigma - d) * (sigma - d);
     } else {
       const s = (d - sigma) / (rc - sigma);
       U = -eps * (1 - s * s) * (1 - s * s);
@@ -1427,9 +1569,23 @@
     const ux = x[h] - x[D], uy = y[h] - y[D], L = Math.sqrt(ux * ux + uy * uy) || 1e-6;
     const c = (ux * (x[A] - x[h]) + uy * (y[A] - y[h])) / (L * d);
     if (c <= 0) return 0;
+    let b = 1;
+    if (this.nb[A] === 2 && P.HB_ACCEPT_POW) {
+      const N1 = this.bp[A * P.MAXB], N2 = this.bp[A * P.MAXB + 1];
+      const a1x = x[N1] - x[A], a1y = y[N1] - y[A], l1 = Math.sqrt(a1x * a1x + a1y * a1y) || 1e-6;
+      const a2x = x[N2] - x[A], a2y = y[N2] - y[A], l2 = Math.sqrt(a2x * a2x + a2y * a2y) || 1e-6;
+      const sx = a1x / l1 + a2x / l2, sy = a1y / l1 + a2y / l2, S = Math.sqrt(sx * sx + sy * sy);
+      const t = (S - HB_FLAT_LO) / (HB_FLAT_HI - HB_FLAT_LO);
+      if (t > 0) {
+        const tc = t >= 1 ? 1 : t, lam = tc * tc * (3 - 2 * tc);
+        const q = -(sx * (x[h] - x[A]) + sy * (y[h] - y[A])) / (S * d);
+        b = 1 - lam + lam * (q > 0 ? Math.pow(q, P.HB_ACCEPT_POW) : 0);
+        if (b <= 0) return 0;
+      }
+    }
     let w = 1;
     if (d > sigma) { const s = (d - sigma) / (rc - sigma); w = (1 - s * s) * (1 - s * s); }
-    return -G * w * Math.pow(c, P.HB_ANGLE_POW);
+    return -G * w * b * Math.pow(c, P.HB_ANGLE_POW);
   };
 
   // Non-bonded energy of a set of atoms with everything around them (pairs inside counted once).
@@ -1444,6 +1600,156 @@
         U += self.pairPotential(i, j);
       });
     }
+    if (P.W3_EPS || P.W2_EPS) U += this.waterAngleEnergyNear(set, count);
+    if (P.METAL_DENSE_PER_MP) U += this.metalEnergyNear(set, count);
+    return U;
+  };
+
+  // Metallic density of free metal atom i (0 for anything else); with `tag`, only neighbours
+  // stamped (sign > 0) or not stamped (sign < 0) count
+  S.metalRho = function (i, tag, sign) {
+    const el = this.el, nb = this.nb, x = this.x, y = this.y, mark = this.mark;
+    const ei = el[i];
+    if (!isMetal[ei] || nb[i]) return 0;
+    let r = 0;
+    this.query(x[i], y[i], this.cellSize, function (j) {
+      if (j === i || !isMetal[el[j]] || nb[j]) return;
+      if (sign && (mark[j] === tag) !== (sign > 0)) return;
+      const p = ei * NZ + el[j], rc = pairRc[p], sigma = pairSigma[p];
+      const dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
+      if (d2 >= rc * rc) return;
+      const d = Math.sqrt(d2);
+      if (d <= sigma) r++;
+      else { const s = (d - sigma) / (rc - sigma), t = 1 - s * s; r += t * t; }
+    });
+    return r;
+  };
+  // the embedding energy F(rho) of a free metal atom and its derivative
+  function embed(z, r) {
+    const t = (r - P.METAL_RHO_A) / (P.METAL_RHO_B - P.METAL_RHO_A);
+    return t <= 0 ? 0 : t >= 1 ? -metalA[z] : -metalA[z] * t * t * (3 - 2 * t);
+  }
+  function embedD(z, r) {
+    const t = (r - P.METAL_RHO_A) / (P.METAL_RHO_B - P.METAL_RHO_A);
+    return t <= 0 || t >= 1 ? 0 : -metalA[z] * 6 * t * (1 - t) / (P.METAL_RHO_B - P.METAL_RHO_A);
+  }
+
+  // Embedding energy that changes when the atoms of set move or change: their own, plus that of
+  // their metal neighbours outside the set, measured relative to the neighbours' density without
+  // the set (which the event cannot change), so differences are exact.
+  S.metalEnergyNear = function (set, count) {
+    const el = this.el, nb = this.nb, x = this.x, y = this.y, mark = this.mark;
+    let any = false;
+    for (let a = 0; a < count; a++) if (isMetal[el[set[a]]]) { any = true; break; }
+    if (!any) return 0;
+    const tag = ++this.markTag;
+    for (let a = 0; a < count; a++) mark[set[a]] = tag;
+    const near = this._fsNear || (this._fsNear = []);
+    near.length = 0;
+    const tag2 = ++this.markTag; // second stamp for 'already listed' neighbours
+    const listed = this._fsListed || (this._fsListed = new Int32Array(this.mark.length));
+    let U = 0;
+    for (let a = 0; a < count; a++) {
+      const i = set[a];
+      if (!isMetal[el[i]]) continue;
+      U += embed(el[i], this.metalRho(i));
+      this.query(x[i], y[i], this.cellSize, function (j) {
+        if (mark[j] !== tag && listed[j] !== tag2 && isMetal[el[j]] && !nb[j]) { listed[j] = tag2; near.push(j); }
+      });
+    }
+    for (const j of near) {
+      const rIn = this.metalRho(j, tag, 1);
+      if (rIn === 0) continue;
+      const rOut = this.metalRho(j, tag, -1);
+      U += embed(el[j], rIn + rOut) - embed(el[j], rOut);
+    }
+    return U;
+  };
+
+  // Water's hydrogen-bond network angle, after the three-body term of the coarse-grained mW water
+  // model (Molinero & Moore, 2009): neighbouring water oxygens prefer O-O-O angles of 120 degrees,
+  // the honeycomb that hexagonal ice shows when seen along its c axis. Dense packing (60 degree
+  // angles) and square packing (90) cost energy, which makes ice open and less dense than water.
+  // U = K sum over centres i and neighbour pairs j<k of f(r_ij) f(r_ik) (cos theta_jik + 1/2)^2,
+  // with f = 1 out to W3_INNER and then fading smoothly to zero at the range W3_RANGE.
+  S.isWaterO = function (i) {
+    if (this.el[i] !== 8 || this.nb[i] !== 2) return false;
+    const b = i * P.MAXB;
+    return this.el[this.bp[b]] === 1 && this.el[this.bp[b + 1]] === 1;
+  };
+  // inSet (optional): a stamp array and value; only angle terms involving a stamped atom count
+  S.waterAngle = function (i, forces, inSet, tag) {
+    const rc = P.W3_RANGE, K = P.W3_EPS * P.KB, x = this.x, y = this.y, fx = this.fx, fy = this.fy;
+    const L = this._w3 || (this._w3 = []);
+    L.length = 0;
+    const self = this;
+    this.query(x[i], y[i], Math.max(rc, P.W2_RANGE), function (j) { if (j !== i && self.isWaterO(j)) L.push(j); });
+    let U = 0;
+    // weights: 1 out to an inner radius (so hydrogen-bonded neighbours feel no radial push from
+    // the angle term), then a smooth fade to zero
+    const r1 = P.W3_INNER, iw = 1 / (rc - r1), q1 = P.W2_INNER, iq = 1 / (P.W2_RANGE - q1);
+    function wt(r) { if (r <= r1) return 1; if (r >= rc) return 0; const g = (r - r1) * iw, h = 1 - g * g; return h * h; }
+    function dwt(r) { if (r <= r1 || r >= rc) return 0; const g = (r - r1) * iw; return -4 * g * (1 - g * g) * iw; }
+    function wt2(r) { if (r <= q1) return 1; if (r >= P.W2_RANGE) return 0; const g = (r - q1) * iq, h = 1 - g * g; return h * h; }
+    function dwt2(r) { if (r <= q1 || r >= P.W2_RANGE) return 0; const g = (r - q1) * iq; return -4 * g * (1 - g * g) * iq; }
+    const K2 = P.W2_EPS * P.KB;
+    for (let p = 0; p < L.length; p++) {
+      const j = L[p], ax = x[j] - x[i], ay = y[j] - y[i];
+      const ra = Math.sqrt(ax * ax + ay * ay) || 1e-6;
+      // two-body cohesion between water oxygens (each pair once, from its lower-index end); it
+      // reaches past the first shell, so a liquid that crowds molecules in closer than the far side
+      // of ice's hexagons (4.8 A) gains from it and water is denser than ice
+      if (K2 && j > i && (!inSet || inSet[i] === tag || inSet[j] === tag)) {
+        U -= K2 * wt2(ra);
+        const d2 = dwt2(ra);
+        if (forces && d2) {
+          const f2 = -K2 * d2 / ra; // -dU/dr along i->j, divided by r
+          fx[j] -= f2 * ax; fy[j] -= f2 * ay; fx[i] += f2 * ax; fy[i] += f2 * ay;
+        }
+      }
+      const fa = wt(ra), dfa = dwt(ra);
+      if (!fa) continue;
+      for (let r = p + 1; r < L.length; r++) {
+        const k = L[r];
+        if (inSet && inSet[i] !== tag && inSet[j] !== tag && inSet[k] !== tag) continue;
+        const bx = x[k] - x[i], by = y[k] - y[i];
+        const rb = Math.sqrt(bx * bx + by * by) || 1e-6;
+        const fb = wt(rb), dfb = dwt(rb);
+        if (!fb) continue;
+        const c = (ax * bx + ay * by) / (ra * rb), dc = c + 0.5;
+        U += K * fa * fb * dc * dc;
+        if (!forces) continue;
+        const kc = 2 * K * fa * fb * dc; // dE/dc
+        const ja = K * dc * dc * fb * dfa / ra, kb = K * dc * dc * fa * dfb / rb; // radial parts
+        const jx = kc * (bx / (ra * rb) - c * ax / (ra * ra)) + ja * ax;
+        const jy = kc * (by / (ra * rb) - c * ay / (ra * ra)) + ja * ay;
+        const kx = kc * (ax / (ra * rb) - c * bx / (rb * rb)) + kb * bx;
+        const ky = kc * (ay / (ra * rb) - c * by / (rb * rb)) + kb * by;
+        fx[j] -= jx; fy[j] -= jy; fx[k] -= kx; fy[k] -= ky;
+        fx[i] += jx + kx; fy[i] += jy + ky;
+      }
+    }
+    return U;
+  };
+  // The network-angle energy of all angle terms that involve a set of atoms (for event
+  // accounting: terms not touching the set cannot change, so they are left out on both sides).
+  S.waterAngleEnergyNear = function (set, count) {
+    const stamp = this._w3s || (this._w3s = new Uint32Array(P.MAX));
+    const mark = this._w3m || (this._w3m = new Uint32Array(P.MAX));
+    this._w3t = (this._w3t || 0) + 1;
+    const t = this._w3t, centres = this._w3c || (this._w3c = []), self = this;
+    centres.length = 0;
+    let any = false;
+    for (let a = 0; a < count; a++) { mark[set[a]] = t; if (this.isWaterO(set[a])) any = true; }
+    if (!any) return 0;
+    for (let a = 0; a < count; a++) {
+      const i = set[a];
+      this.query(this.x[i], this.y[i], Math.max(P.W3_RANGE, P.W2_RANGE) + 8, function (j) {
+        if (stamp[j] !== t && self.isWaterO(j)) { stamp[j] = t; centres.push(j); }
+      });
+    }
+    let U = 0;
+    for (let k = 0; k < centres.length; k++) U += this.waterAngle(centres[k], false, mark, t);
     return U;
   };
 
@@ -1453,15 +1759,15 @@
     if (m < 2) return 0;
     const MB = P.MAXB, base = c * MB, x = this.x, y = this.y, el = this.el, K = P.K_ANGLE;
     const self = this;
-    function springU(a, b, target) {
+    function springU(a, b, target, k) {
       const d = Math.hypot(x[b] - x[a], y[b] - y[a]);
       const ma = mass[el[a]], mb = mass[el[b]];
-      return 0.5 * K * (ma * mb / (ma + mb)) * (d - target) * (d - target);
+      return 0.5 * (k || K) * (ma * mb / (ma + mb)) * (d - target) * (d - target);
     }
     if (m === 2) {
       const theta = angleFor(el[c], this.used[c]);
       const la = this.bl[base], lb = this.bl[base + 1];
-      return springU(this.bp[base], this.bp[base + 1], Math.sqrt(la * la + lb * lb - 2 * la * lb * Math.cos(theta)));
+      return springU(this.bp[base], this.bp[base + 1], Math.sqrt(la * la + lb * lb - 2 * la * lb * Math.cos(theta)), P.K_ANGLE_2);
     }
     const order = [];
     for (let k = 0; k < m; k++) {
@@ -1710,10 +2016,9 @@
   S.solidAnneal = function () {
     const n = this.n, frac = P.ANNEAL_TRIALS;
     if (!frac || !n) return;
-    const MB = P.MAXB, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el, rng = this.rng;
-    const set = this._anSet || (this._anSet = new Int32Array(8));
-    const ox = this._anX || (this._anX = new Float64Array(16));
-    const W = P.W, H = P.H, margin = 40;
+    const x = this.x, y = this.y, el = this.el, rng = this.rng;
+    const set = this._anSet || (this._anSet = new Int32Array(6));
+    const ox = this._anX || (this._anX = new Float64Array(12));
     const trials = Math.max(1, Math.round(n * frac));
     // fresh neighbour lists: a missed neighbour would make some moves look free, and the
     // Metropolis rule would pick exactly those, creating energy
@@ -1721,55 +2026,314 @@
     for (let t = 0; t < trials; t++) {
       const r = Math.floor(rng() * n);
       // only frozen molecular solids: packed, and colder than their documented melting point
-      if (!this.nb[r] || this.condF[r] < 0.5 || !(this.tLoc[r] < this.meltT[r])) continue;
-      // the whole molecule, if it is small (at most 6 atoms)
-      let m = 0, big = false;
-      set[m++] = r;
-      for (let h = 0; h < m && !big; h++) {
-        const a = set[h];
-        for (let k = 0; k < this.nb[a]; k++) {
-          const b = this.bp[a * MB + k];
-          let seen = false;
-          for (let c = 0; c < m; c++) if (set[c] === b) { seen = true; break; }
-          if (seen) continue;
-          if (m >= 6) { big = true; break; }
-          set[m++] = b;
+      if (!this.frozenAt(r)) continue;
+      const m = this.gatherMolecule(r, set, 0, 6);
+      if (m < 0) continue;
+      // a small turn and shift of the whole molecule about its centre of mass
+      let M = 0, cx = 0, cy = 0;
+      for (let a = 0; a < m; a++) { const mi = mass[el[set[a]]]; cx += mi * x[set[a]]; cy += mi * y[set[a]]; M += mi; }
+      cx /= M; cy /= M;
+      const th = (rng() * 2 - 1) * P.ANNEAL_ANGLE;
+      const sx = (rng() * 2 - 1) * P.ANNEAL_SHIFT, sy = (rng() * 2 - 1) * P.ANNEAL_SHIFT;
+      this.annealMove(set, m, cx, cy, th, sx, sy, ox, r);
+    }
+  };
+
+  // Is atom i part of a frozen molecular solid (packed, away from the glass, below its melting point)?
+  S.frozenAt = function (i) {
+    if (!this.nb[i] || this.grainOf[i] >= 0 || this.condF[i] < 0.5 || !(this.tLoc[i] < this.meltT[i])) return false;
+    const m = 40;
+    return this.x[i] > m && this.x[i] < P.W - m && this.y[i] > m && this.y[i] < P.H - m;
+  };
+
+  // Collects the molecule of atom r into set[from..] (at most `cap` atoms in all); returns the
+  // new end index, or -1 when the molecule is too big or not all of it is frozen.
+  S.gatherMolecule = function (r, set, from, cap) {
+    const MB = P.MAXB;
+    let m = from;
+    set[m++] = r;
+    for (let h = from; h < m; h++) {
+      const a = set[h];
+      if (!this.frozenAt(a) && this.nb[a] > 0 && this.el[a] !== 1) return -1;
+      for (let k = 0; k < this.nb[a]; k++) {
+        const b = this.bp[a * MB + k];
+        let seen = false;
+        for (let c = from; c < m; c++) if (set[c] === b) { seen = true; break; }
+        if (seen) continue;
+        if (m >= cap || m - from >= 6) return -1;
+        set[m++] = b;
+      }
+    }
+    return m;
+  };
+
+  // Tries a rigid turn (th about cx, cy) plus shift of the atoms in set; Metropolis at the local
+  // temperature, the energy change settled with the local heat. Returns true if accepted.
+  S.annealMove = function (set, m, cx, cy, th, sx, sy, ox, r) {
+    const x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
+    const U0 = this.eventEnergy(set, m);
+    const c = Math.cos(th), sn = Math.sin(th);
+    let dG = 0;
+    for (let a = 0; a < m; a++) {
+      const i = set[a];
+      ox[2 * a] = x[i]; ox[2 * a + 1] = y[i];
+      const rx = x[i] - cx, ry = y[i] - cy;
+      x[i] = cx + sx + rx * c - ry * sn; y[i] = cy + sy + rx * sn + ry * c;
+      dG -= mass[el[i]] * this.gAcc[i] * (y[i] - ox[2 * a + 1]); // gravity's potential energy
+    }
+    const dU = this.eventEnergy(set, m) - U0 + dG;
+    const RT = P.KB * Math.max(this.tLoc[r], 1);
+    if (dU > 0 && this.rng() >= Math.exp(-dU / RT)) {
+      for (let a = 0; a < m; a++) { const i = set[a]; x[i] = ox[2 * a]; y[i] = ox[2 * a + 1]; }
+      return false;
+    }
+    // accepted: carry each atom's velocity round with it, and settle the energy change locally
+    for (let a = 0; a < m; a++) {
+      const i = set[a], vx = ox[2 * a] - px[i], vy = ox[2 * a + 1] - py[i];
+      px[i] = x[i] - (vx * c - vy * sn); py[i] = y[i] - (vx * sn + vy * c);
+    }
+    if (dU !== 0) this.heatRaw(set[0], set[1], -dU);
+    return true;
+  };
+
+
+  // ---------------------------------------------------------------------------------------
+  // Crystal engine
+  // ---------------------------------------------------------------------------------------
+  // A real crystal settles into its lattice over countless molecular vibrations, far more than
+  // the time-compressed simulation can show one by one; left alone, water cooled on screen
+  // freezes into a disordered network (a glass). So frozen material is gathered into crystal
+  // grains. Each grain holds the ideal lattice of its substance: the honeycomb of ice (hexagonal
+  // ice seen along its c axis, every edge carrying one hydrogen, alternate oxygens with a
+  // dangling H) or the close-packed layer of a metal. Members are pulled toward the best-fitting
+  // placement of that template (shape matching: the template may translate and rotate, so a
+  // block of ice still falls and tips). Because the fit is re-optimised every step the pull is a
+  // true potential energy, U = k/2 sum m |x - goal|^2, and every join and leave is settled with
+  // the local heat, so energy stays conserved. Material colder than its documented melting point
+  // joins a neighbouring grain at a free lattice site (or starts one, most readily on the glass,
+  // aligned with it); a member warmer than the melting point leaves (melts).
+
+  // 1: a water oxygen (ice), 2: a free metal atom, 0: nothing that crystallises here
+  S.crystalKind = function (i) {
+    if (this.isWaterO(i)) return 1;
+    if (isMetal[this.el[i]] && this.nb[i] === 0) return 2;
+    return 0;
+  };
+  S.crystalMeltT = function (i, kind) { return kind === 1 ? (this.meltT[i] || 273.15) : meltK[this.el[i]]; };
+  S.crystalSpacing = function (kind, z) { return kind === 1 ? P.ICE_A : pairSigma[z * NZ + z]; };
+
+  // lattice site nearest to rest-frame point (rx, ry): { key, x, y, sub }
+  S.crystalSite = function (g, rx0, ry0) {
+    const a = g.a, phi = g.phi, ox = g.ox, oy = g.oy, rx = rx0 - ox, ry = ry0 - oy;
+    let best = null, bd = Infinity;
+    if (g.kind === 2) {
+      // triangular: t1 = a (cos phi, sin phi), t2 = a (cos(phi+60), sin(phi+60))
+      const t1x = a * Math.cos(phi), t1y = a * Math.sin(phi), t2x = a * Math.cos(phi + Math.PI / 3), t2y = a * Math.sin(phi + Math.PI / 3);
+      const det = t1x * t2y - t1y * t2x, f1 = (rx * t2y - ry * t2x) / det, f2 = (t1x * ry - t1y * rx) / det;
+      for (let d1 = 0; d1 <= 1; d1++) for (let d2 = 0; d2 <= 1; d2++) {
+        const n1 = Math.floor(f1) + d1, n2 = Math.floor(f2) + d2;
+        const sx = n1 * t1x + n2 * t2x, sy = n1 * t1y + n2 * t2y, dd = (sx - rx) * (sx - rx) + (sy - ry) * (sy - ry);
+        if (dd < bd) { bd = dd; best = { key: n1 + ',' + n2, x: sx + ox, y: sy + oy, sub: 0 }; }
+      }
+      return best;
+    }
+    // honeycomb: A sites at n1 b1 + n2 b2 with b1 = a (e0 - e1), b2 = a (e0 - e2); B = A + a e0
+    const e = g.e, b1x = a * (e[0] - e[2]), b1y = a * (e[1] - e[3]), b2x = a * (e[0] - e[4]), b2y = a * (e[1] - e[5]);
+    const det = b1x * b2y - b1y * b2x;
+    for (let sub = 0; sub <= 1; sub++) {
+      const qx = rx - sub * a * e[0], qy = ry - sub * a * e[1];
+      const f1 = (qx * b2y - qy * b2x) / det, f2 = (b1x * qy - b1y * qx) / det;
+      for (let d1 = 0; d1 <= 1; d1++) for (let d2 = 0; d2 <= 1; d2++) {
+        const n1 = Math.floor(f1) + d1, n2 = Math.floor(f2) + d2;
+        const sx = n1 * b1x + n2 * b2x + sub * a * e[0], sy = n1 * b1y + n2 * b2y + sub * a * e[1];
+        const dd = (sx - rx) * (sx - rx) + (sy - ry) * (sy - ry);
+        if (dd < bd) { bd = dd; best = { key: n1 + ',' + n2 + ',' + sub, x: sx + ox, y: sy + oy, sub: sub }; }
+      }
+    }
+    return best;
+  };
+
+  // Best rigid placement of grain g (centre, template centre, angle) and its spring energy.
+  S.crystalFit = function (g) {
+    const x = this.x, y = this.y;
+    let M = 0, cx = 0, cy = 0, sx = 0, sy = 0;
+    for (let k = 0; k < g.mem.length; k++) {
+      const u = g.mem[k];
+      for (let q = 0; q < u.atoms.length; q++) {
+        const i = u.atoms[q], m = mass[this.el[i]];
+        M += m; cx += m * x[i]; cy += m * y[i]; sx += m * u.rest[2 * q]; sy += m * u.rest[2 * q + 1];
+      }
+    }
+    cx /= M; cy /= M; sx /= M; sy /= M;
+    let num = 0, den = 0;
+    for (let k = 0; k < g.mem.length; k++) {
+      const u = g.mem[k];
+      for (let q = 0; q < u.atoms.length; q++) {
+        const i = u.atoms[q], m = mass[this.el[i]];
+        const ax = u.rest[2 * q] - sx, ay = u.rest[2 * q + 1] - sy, bx = x[i] - cx, by = y[i] - cy;
+        num += m * (ax * by - ay * bx); den += m * (ax * bx + ay * by);
+      }
+    }
+    g.cx = cx; g.cy = cy; g.sx = sx; g.sy = sy; g.th = Math.atan2(num, den);
+    return g;
+  };
+  S.crystalEnergy = function (g, forces) {
+    if (!g.mem.length) return 0;
+    this.crystalFit(g);
+    const x = this.x, y = this.y, c = Math.cos(g.th), sn = Math.sin(g.th), k = P.CRYSTAL_K;
+    let U = 0;
+    for (let q0 = 0; q0 < g.mem.length; q0++) {
+      const u = g.mem[q0];
+      for (let q = 0; q < u.atoms.length; q++) {
+        const i = u.atoms[q], m = mass[this.el[i]];
+        const ax = u.rest[2 * q] - g.sx, ay = u.rest[2 * q + 1] - g.sy;
+        const gx = g.cx + ax * c - ay * sn, gy = g.cy + ax * sn + ay * c;
+        const dx = x[i] - gx, dy = y[i] - gy;
+        U += 0.5 * k * m * (dx * dx + dy * dy);
+        if (forces) { this.fx[i] -= k * m * dx; this.fy[i] -= k * m * dy; }
+      }
+    }
+    return U;
+  };
+  S.crystalForces = function () {
+    for (let k = 0; k < this.grains.length; k++) this.crystalEnergy(this.grains[k], true);
+  };
+
+  // world position -> grain template frame
+  S.crystalToRest = function (g, wx, wy) {
+    const c = Math.cos(g.th), sn = Math.sin(g.th), dx = wx - g.cx, dy = wy - g.cy;
+    return [g.sx + dx * c + dy * sn, g.sy - dx * sn + dy * c];
+  };
+
+  // Adds atom i (a water oxygen or a metal atom) to grain g at site, if the strain of the new
+  // spring is at most maxE; the spring then draws it onto the site over the next moments, pushing
+  // neighbours aside like a real freezing front. The jump in spring energy is settled with the
+  // local heat (the latent heat itself comes from the bonds the ordered layer makes).
+  S.crystalJoin = function (g, i, site, maxE) {
+    const mem = { atoms: [i], rest: [site.x, site.y], key: site.key };
+    const U0 = this.crystalEnergy(g, false);
+    g.mem.push(mem); g.sites.set(site.key, mem);
+    const U1 = this.crystalEnergy(g, false);
+    if (U1 - U0 > maxE) { g.mem.pop(); g.sites.delete(site.key); this.crystalFit(g); return false; }
+    this.grainOf[i] = this.grains.indexOf(g);
+    if (U1 !== U0) this.heatRaw(i, this.crystalPartner(i), -(U1 - U0));
+    return true;
+  };
+  S.crystalPartner = function (i) { return this.nb[i] ? this.bp[i * P.MAXB] : this.crystalNeighbour(i); };
+  S.crystalNeighbour = function (i) {
+    let best = i, bd = Infinity;
+    const self = this;
+    this.query(this.x[i], this.y[i], 60, function (j, d) { if (j !== i && d < bd) { bd = d; best = j; } });
+    return best;
+  };
+
+  // Removes the unit containing atom i from its grain (melting, reaction, removal).
+  S.crystalEject = function (i) {
+    const gid = this.grainOf[i];
+    if (gid < 0) return;
+    const g = this.grains[gid];
+    let k = -1;
+    for (let q = 0; q < g.mem.length; q++) if (g.mem[q].atoms.indexOf(i) >= 0) { k = q; break; }
+    if (k < 0) { this.grainOf[i] = -1; return; }
+    const u = g.mem[k];
+    this._crystalBusy = true;
+    const U0 = this.crystalEnergy(g, false);
+    g.mem.splice(k, 1); g.sites.delete(u.key);
+    for (let q = 0; q < u.atoms.length; q++) this.grainOf[u.atoms[q]] = -1;
+    const U1 = this.crystalEnergy(g, false);
+    if (U1 !== U0) this.heatRaw(u.atoms[0], this.crystalPartner(u.atoms[0]), U0 - U1);
+    this._crystalBusy = false;
+  };
+
+  // particle moved from index `from` to `to` (removeParticle's swap)
+  S.crystalRenumber = function (from, to) {
+    const g = this.grains[this.grainOf[from]];
+    if (!g) return;
+    for (let q = 0; q < g.mem.length; q++) {
+      const k = g.mem[q].atoms.indexOf(from);
+      if (k >= 0) { g.mem[q].atoms[k] = to; return; }
+    }
+  };
+
+  // Joining, nucleation and melting, every few substeps.
+  S.crystalUpdate = function () {
+    const n = this.n, x = this.x, y = this.y, rng = this.rng, self = this;
+    if (!P.CRYSTAL_K || !n) return;
+    // melting and dislodged members leave
+    for (let gi = 0; gi < this.grains.length; gi++) {
+      const g = this.grains[gi];
+      if (!g.mem.length) continue;
+      this.crystalFit(g);
+      const c = Math.cos(g.th), sn = Math.sin(g.th);
+      for (let q = g.mem.length - 1; q >= 0; q--) {
+        const u = g.mem[q], i = u.atoms[0];
+        const ax = u.rest[0] - g.sx, ay = u.rest[1] - g.sy;
+        const off = Math.hypot(x[i] - (g.cx + ax * c - ay * sn), y[i] - (g.cy + ax * sn + ay * c));
+        if (this.tLoc[i] > this.crystalMeltT(i, g.kind) + P.CRYSTAL_HYST || off > 0.6 * g.a) {
+          this.crystalEject(i);
+          this.crystalFit(g);
         }
       }
-      if (big) continue;
-      let cx = 0, cy = 0, M = 0, nearWall = false;
-      for (let a = 0; a < m; a++) {
-        const i = set[a], mi = mass[el[i]];
-        if (this.condF[i] < 0.5) { nearWall = true; break; }
-        if (x[i] < margin || x[i] > W - margin || y[i] < margin || y[i] > H - margin) { nearWall = true; break; }
-        cx += mi * x[i]; cy += mi * y[i]; M += mi;
-      }
-      if (nearWall) continue;
-      cx /= M; cy /= M;
-      const U0 = this.eventEnergy(set, m);
-      // a small turn and shift of the whole molecule
-      const th = (rng() * 2 - 1) * P.ANNEAL_ANGLE, c = Math.cos(th), sn = Math.sin(th);
-      const sx = (rng() * 2 - 1) * P.ANNEAL_SHIFT, sy = (rng() * 2 - 1) * P.ANNEAL_SHIFT;
-      let dG = 0;
-      for (let a = 0; a < m; a++) {
-        const i = set[a];
-        ox[2 * a] = x[i]; ox[2 * a + 1] = y[i];
-        const rx = x[i] - cx, ry = y[i] - cy;
-        x[i] = cx + sx + rx * c - ry * sn; y[i] = cy + sy + rx * sn + ry * c;
-        dG -= mass[el[i]] * this.gAcc[i] * (y[i] - ox[2 * a + 1]); // gravity's potential energy
-      }
-      const dU = this.eventEnergy(set, m) - U0 + dG;
-      const RT = P.KB * Math.max(this.tLoc[r], 1);
-      if (dU > 0 && rng() >= Math.exp(-dU / RT)) {
-        for (let a = 0; a < m; a++) { const i = set[a]; x[i] = ox[2 * a]; y[i] = ox[2 * a + 1]; }
+    }
+    // tidy away empty grains (renumbering their members' grain ids)
+    if (this.grains.some(function (g) { return !g.mem.length; })) {
+      const keep = this.grains.filter(function (g) { return g.mem.length; });
+      this.grains = keep;
+      this.grainOf.fill(-1, 0, n);
+      for (let gi = 0; gi < keep.length; gi++) for (let q = 0; q < keep[gi].mem.length; q++) for (const i of keep[gi].mem[q].atoms) this.grainOf[i] = gi;
+    }
+    // candidates: cold crystallisable units not in a grain
+    const tries = Math.max(1, Math.round(n * P.CRYSTAL_TRIES));
+    this.buildGrid();
+    for (let t = 0; t < tries; t++) {
+      const i = Math.floor(rng() * n);
+      if (this.grainOf[i] >= 0) continue;
+      const kind = this.crystalKind(i);
+      if (!kind || this.condF[i] < 0.5 || !(this.tLoc[i] < this.crystalMeltT(i, kind))) continue;
+      const a = this.crystalSpacing(kind, this.el[i]);
+      // nearest member of a grain of the same substance
+      let best = -1, bd = 1.7 * a;
+      this.query(x[i], y[i], 1.7 * a, function (j, d) {
+        if (j === i || self.grainOf[j] < 0 || d >= bd) return;
+        const g = self.grains[self.grainOf[j]];
+        if (g.kind !== kind || (kind === 2 && g.z !== self.el[i]) || g.mem[0] === undefined) return;
+        if (kind === 1 && !self.isWaterO(j)) return;
+        best = j; bd = d;
+      });
+      if (best >= 0) {
+        const g = this.grains[this.grainOf[best]];
+        if (g.mem.length >= P.CRYSTAL_MAX_MEMBERS) continue;
+        this.crystalFit(g);
+        const r = this.crystalToRest(g, x[i], y[i]);
+        const site = this.crystalSite(g, r[0], r[1]);
+        if (g.sites.has(site.key) || Math.hypot(site.x - r[0], site.y - r[1]) > 0.45 * a) continue;
+        this.crystalJoin(g, i, site, P.CRYSTAL_JOIN_MAX * P.KB);
         continue;
       }
-      // accepted: carry each atom's velocity round with it, and settle the energy change locally
-      for (let a = 0; a < m; a++) {
-        const i = set[a], vx = ox[2 * a] - px[i], vy = ox[2 * a + 1] - py[i];
-        px[i] = x[i] - (vx * c - vy * sn); py[i] = y[i] - (vx * sn + vy * c);
-      }
-      if (dU !== 0) this.heatRaw(set[0], set[1], -dU);
+      // nobody to join: nucleate a new grain (readily on the glass, rarely in the bulk)
+      if (this.grains.length >= P.CRYSTAL_MAX_GRAINS) continue;
+      let crowd = false;
+      this.query(x[i], y[i], 2.5 * a, function (j) { if (self.grainOf[j] >= 0) crowd = true; });
+      if (crowd) continue;
+      const W = P.W, H = P.H, wall = Math.min(x[i], W - x[i], H - y[i]);
+      const onGlass = wall < P.CRYSTAL_GLASS_RANGE;
+      if (rng() > (onGlass ? P.CRYSTAL_NUC_GLASS : P.CRYSTAL_NUC_BULK)) continue;
+      // orientation: a lattice row along the nearest glass, or the molecule's own frame
+      let phi;
+      const floor = H - y[i] <= Math.min(x[i], W - x[i]);
+      if (kind === 1) {
+        if (onGlass) phi = floor ? -Math.PI / 2 : 0; // one bond across the wall: zig-zag rows along it
+        else { const h1 = this.bp[i * P.MAXB], h2 = this.bp[i * P.MAXB + 1]; phi = Math.atan2(y[h1] + y[h2] - 2 * y[i], x[h1] + x[h2] - 2 * x[i]) + Math.PI; }
+      } else phi = onGlass ? (floor ? 0 : Math.PI / 2) : rng() * Math.PI / 3;
+      // the template frame is the world frame at the moment of nucleation, the lattice origin on
+      // the nucleus
+      const g = { kind: kind, z: this.el[i], a: a, phi: phi, e: [], mem: [], sites: new Map(), ox: x[i], oy: y[i], cx: x[i], cy: y[i], sx: x[i], sy: y[i], th: 0 };
+      for (let k = 0; k < 3; k++) g.e.push(Math.cos(phi + k * 2 * Math.PI / 3), Math.sin(phi + k * 2 * Math.PI / 3));
+      this.grains.push(g);
+      const site = { key: kind === 1 ? '0,0,0' : '0,0', x: x[i], y: y[i], sub: 0 };
+      const mem = { atoms: [i], rest: [site.x, site.y], key: site.key };
+      g.mem.push(mem); g.sites.set(site.key, mem);
+      this.grainOf[i] = this.grains.length - 1;
     }
   };
 
@@ -1829,6 +2393,7 @@
         this.solidAnneal();
       }
       if (this.substep % 64 === 0) this.updateMeltPoints();
+      if (this.substep % 4 === 2) this.crystalUpdate();
       this.feedGas(P.DT);
       this.time += P.DT;
       this.substep++;

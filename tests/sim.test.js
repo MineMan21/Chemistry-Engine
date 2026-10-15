@@ -201,7 +201,7 @@ test('water freezes into an ordered lattice and is recognised as a solid', funct
   sim.react = function () {}; sim.bondEvents = function () {};
   sim.addMolecules(H2O, 500, P.W / 2, P.H - 200, { x: 350, y: 150 });
   sim.plateTemp = 200;
-  run(sim, 10);
+  run(sim, 14); // the open ice lattice takes a little longer to grow than a dense one
   const O = [];
   for (let i = 0; i < sim.n; i++) if (sim.el[i] === 8) O.push(i);
   let solid = 0, order = 0, counted = 0;
@@ -219,6 +219,91 @@ test('water freezes into an ordered lattice and is recognised as a solid', funct
   assert.ok(sim.temperature < 260, 'cooled to ' + sim.temperature);
   assert.ok(solid > 0.8 * O.length, 'ice counted as solid: ' + solid + ' of ' + O.length);
   assert.ok(order / counted > 0.7, 'lattice order psi6 ' + (order / counted).toFixed(2));
+});
+
+// order and mobility of the atoms of element z: hexagonal order psi6, fraction in crystal grains,
+// fraction with no metal neighbour (vapour) and the 90th-percentile height above the floor
+function metalState(sim, z) {
+  const A = [];
+  for (let i = 0; i < sim.n; i++) if (sim.el[i] === z) A.push(i);
+  const sig = 2 * CE.elements[z].radius;
+  let order = 0, counted = 0, crystal = 0, vapour = 0;
+  const hs = [];
+  A.forEach(function (i) {
+    let re = 0, im = 0, k = 0, near = 0;
+    A.forEach(function (j) {
+      if (j === i) return;
+      const dx = sim.x[j] - sim.x[i], dy = sim.y[j] - sim.y[i], d2 = dx * dx + dy * dy;
+      if (d2 < sig * sig * 2.1) near++;
+      if (d2 < sig * sig * 1.56) { const a = 6 * Math.atan2(dy, dx); re += Math.cos(a); im += Math.sin(a); k++; }
+    });
+    if (k >= 2) { order += Math.hypot(re, im) / k; counted++; }
+    if (sim.grainOf[i] >= 0) crystal++;
+    if (!near) vapour++;
+    hs.push(P.H - sim.y[i]);
+  });
+  hs.sort(function (a, b) { return a - b; });
+  return { psi6: order / counted, crystal: crystal / A.length, vapour: vapour / A.length, h90: hs[Math.floor(hs.length * 0.9)] };
+}
+function positions(sim) { return { x: Array.from(sim.x.slice(0, sim.n)), y: Array.from(sim.y.slice(0, sim.n)) }; }
+function rmsMove(sim, before) {
+  let s = 0;
+  for (let i = 0; i < before.x.length; i++) s += Math.pow(sim.x[i] - before.x[i], 2) + Math.pow(sim.y[i] - before.y[i], 2);
+  return Math.sqrt(s / before.x.length);
+}
+
+test('iron melts on a 2100 K plate, stays a liquid, and hardens into crystal grains when cooled', function () {
+  const sim = newSim(21);
+  const fe = Z('Fe');
+  sim.addMoles(fe, 0.3, P.W / 2, P.H - 150);
+  run(sim, 2);
+  const cold = metalState(sim, fe);
+  assert.ok(cold.crystal > 0.8 && cold.psi6 > 0.85, 'solid iron at room temperature is crystalline: ' + JSON.stringify(cold));
+  sim.plateTemp = 2100;
+  run(sim, 8);
+  let before = positions(sim);
+  run(sim, 1);
+  const hot = metalState(sim, fe), flow = rmsMove(sim, before);
+  assert.ok(hot.crystal < 0.1, 'molten iron is not crystalline: ' + JSON.stringify(hot));
+  assert.ok(flow > 25, 'molten iron flows: atoms moved ' + flow.toFixed(1) + ' per second');
+  assert.ok(hot.vapour < 0.03 && hot.h90 < 600, 'molten iron stays together on the plate: ' + JSON.stringify(hot));
+  sim.plateTemp = 293;
+  run(sim, 12);
+  before = positions(sim);
+  run(sim, 1);
+  const recast = metalState(sim, fe);
+  assert.ok(recast.crystal > 0.6 && recast.psi6 > 0.8, 'cooled iron crystallises: ' + JSON.stringify(recast));
+  const still = rmsMove(sim, before);
+  assert.ok(still < flow / 2, 'cooled iron is rigid: atoms moved ' + still.toFixed(1) + ' per second (melt: ' + flow.toFixed(1) + ')');
+});
+
+test('gallium melts just above its 303 K melting point and freezes below it', function () {
+  const sim = newSim(22);
+  const ga = Z('Ga');
+  sim.addMoles(ga, 0.3, P.W / 2, P.H - 150);
+  sim.plateTemp = 340;
+  run(sim, 8);
+  let before = positions(sim);
+  run(sim, 1);
+  const melt = metalState(sim, ga);
+  assert.ok(melt.crystal < 0.1 && rmsMove(sim, before) > 15, 'liquid gallium at 340 K: ' + JSON.stringify(melt));
+  assert.ok(melt.vapour < 0.03, 'liquid gallium does not evaporate: ' + JSON.stringify(melt));
+  sim.plateTemp = 240;
+  run(sim, 12);
+  const frozen = metalState(sim, ga);
+  assert.ok(frozen.crystal > 0.6, 'gallium freezes at 240 K: ' + JSON.stringify(frozen));
+});
+
+test('mercury is a liquid at room temperature', function () {
+  const sim = newSim(23);
+  const hg = Z('Hg');
+  sim.addMoles(hg, 0.3, P.W / 2, P.H - 150);
+  run(sim, 6);
+  const before = positions(sim);
+  run(sim, 1);
+  const s = metalState(sim, hg);
+  assert.ok(s.crystal < 0.1 && rmsMove(sim, before) > 15, 'mercury flows at 293 K: ' + JSON.stringify(s));
+  assert.ok(s.vapour < 0.05, 'mercury stays mostly liquid: ' + JSON.stringify(s));
 });
 
 test('removing particles keeps bonds consistent', function () {
