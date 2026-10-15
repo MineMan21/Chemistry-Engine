@@ -31,7 +31,9 @@
     HB_CONTACT: 0.78, // hydrogen-bonded H...X pairs may approach to this fraction of contact
     METAL_EPS_PER_BP: 1.05, // metallic cohesion well depth (K) per K of boiling point
     G_GAS: 1, // gravity felt by isolated (gas) particles
-    G_CONDENSED: 650, // extra gravity for particles touching others (liquids/solids settle)
+    G_CONDENSED: 650,
+    G_SOLID: 110, // gentler settling for solids, so a lump keeps its shape instead of being
+    // crushed flat by its own weight (molecular-scale gravity this strong would exceed cohesion) // extra gravity for particles touching others (liquids/solids settle)
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
     BULK_VMAX_FLOOR: 15, // ... near the floor, so material lands softly
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
@@ -52,6 +54,7 @@
     WALL_ADH_SCALE: 0.6, // glass attraction relative to an atom's own dispersion strength
     WALL_HB: 650, // extra attraction (K) of glass silanol groups for H-bond donors/acceptors
     WALL_FRICTION: 250, // drag (1/s) on liquid touching the glass, so drops cling instead of sliding
+    WALL_ACCOM_GAMMA: 0, // heat exchange (1/s) of a lone molecule touching the glass (off: it skews the gauge)
     CONDUCTION: 8, // heat exchange (1/s) of liquids/solids with the plate, at the floor...
     CONDUCTION_DEPTH: 350, // ...fading over this height (units)
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
@@ -82,6 +85,7 @@
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
   const elColor = new Uint32Array(NZ);
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
+  const meltK = new Float32Array(NZ); // melting point (K)
   for (let z = 1; z < NZ; z++) {
     const e = E[z];
     // Dynamical mass. Hydrogen is made heavier (a standard molecular-dynamics trick) so its
@@ -96,6 +100,7 @@
     vdwEps[z] = e.vdwEps;
     metalEps[z] = e.isMetal ? P.METAL_EPS_PER_BP * (e.bp || (e.mp ? e.mp * 2.5 : 3000)) : 0;
     elColor[z] = packColor(e.color);
+    meltK[z] = e.mp || 1000;
     // metals (mercury!) barely wet glass; everything else feels a fraction of its dispersion
     wallAdh[z] = e.isMetal ? 20 : P.WALL_ADH_SCALE * e.vdwEps * P.VDW_SCALE;
   }
@@ -326,12 +331,13 @@
   // Adds `count` copies of a small molecule template { atoms: [[z, dx, dy], ...],
   // bonds: [[a, b, order], ...] } scattered around (cx, cy) inside a box of half-size `spread`.
   // Used by the experiment presets (the user otherwise only adds elements).
-  S.addMolecules = function (tpl, count, cx, cy, spread, T) {
+  S.addMolecules = function (tpl, count, cx, cy, spread, T, spacing) {
     T = T || P.AMBIENT;
     let size = 0;
     tpl.atoms.forEach(function (a) { size = Math.max(size, Math.hypot(a[1], a[2]) + radius[a[0]] * 0.5); });
-    // triangular lattice filling the box (liquid-like packing), visited in random order
-    const a0 = size * 2.05, sites = [];
+    // triangular lattice filling the box (liquid-like packing unless a wider spacing is asked
+    // for, e.g. for gases), visited in random order
+    const a0 = size * 2.05 * (spacing || 1), sites = [];
     for (let j = 0; ; j++) {
       const ly = cy - spread.y + j * a0 * 0.866;
       if (ly > cy + spread.y) break;
@@ -367,6 +373,29 @@
       added++;
     }
     return added;
+  };
+
+  // Copies the molecule containing atom i as a template for addMolecules (positions relative to
+  // its centre, bonds with their orders). Returns null for clusters too big to reuse.
+  S.captureMolecule = function (i, maxAtoms) {
+    if (i < 0 || i >= this.n) return null;
+    const atoms = this.moleculeOf(i, []);
+    if (atoms.length > (maxAtoms || 120)) return null;
+    let cx = 0, cy = 0;
+    for (let k = 0; k < atoms.length; k++) { cx += this.x[atoms[k]]; cy += this.y[atoms[k]]; }
+    cx /= atoms.length; cy /= atoms.length;
+    const index = new Map();
+    const tplAtoms = atoms.map(function (a, k) { index.set(a, k); return [this.el[a], +(this.x[a] - cx).toFixed(2), +(this.y[a] - cy).toFixed(2)]; }, this);
+    const bonds = [];
+    const MB = P.MAXB;
+    for (let k = 0; k < atoms.length; k++) {
+      const a = atoms[k];
+      for (let m = 0; m < this.nb[a]; m++) {
+        const b = this.bp[a * MB + m];
+        if (b > a) bonds.push([k, index.get(b), this.bo[a * MB + m]]);
+      }
+    }
+    return { atoms: tplAtoms, bonds: bonds };
   };
 
   // Moles -> particles. Diatomic elements add moles of X2 molecules.
@@ -579,6 +608,20 @@
     return true;
   };
 
+  // Is atom i part of a solid? Metals below their melting point, ionic crystals and covalent
+  // networks (chains/rings/lattices of multiply bonded atoms) are; molecular liquids are not.
+  S.isSolidAtom = function (i) {
+    const z = this.el[i], nb = this.nb[i];
+    if (isMetal[z] && nb === 0) return this.tLoc[i] < meltK[z];
+    if (nb === 0) return false;
+    const MB = P.MAXB, base = i * MB;
+    for (let k = 0; k < nb; k++) {
+      if (this.bc[base + k] === 2) return true;
+      if (nb >= 2 && this.nb[this.bp[base + k]] >= 2) return true;
+    }
+    return false;
+  };
+
   S.sameBatch = function (i, j) {
     return this.tag[i] !== 0 && this.tag[i] === this.tag[j] && this.el[i] === this.el[j];
   };
@@ -783,9 +826,9 @@
     for (let i = 0; i < n; i++) {
       let c = contacts[i] >= 2 ? 1 : 0;
       if (!c) for (let k = 0; k < this.nb[i]; k++) if (contacts[this.bp[i * MB + k]] >= 2) { c = 1; break; }
-      // switches on slowly (sustained packing) and off quickly, so evaporating molecules are
-      // not dragged back into the liquid
-      condF[i] += (c > condF[i] ? 0.03 : 0.25) * (c - condF[i]);
+      // changes gradually both ways: a force that flickers with contacts would pump energy into
+      // surface molecules
+      condF[i] += 0.04 * (c - condF[i]);
     }
     for (let i = 0; i < n; i++) {
       if (contacts[i] < 2) continue;
@@ -804,7 +847,7 @@
       // settling gravity only for material that is clearly packed (passing gas collisions give
       // a small condF that must not pile the vapour up near the floor)
       const cs = (condF[i] - 0.5) * 3.3;
-      const g = P.G_GAS + P.G_CONDENSED * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
+      const g = P.G_GAS + (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
       let bvx = 0, bvy = 0;
@@ -871,10 +914,12 @@
           f = f < 0.9 ? 0.9 : f > 1.03 ? 1.03 : f;
           vx = bvx + (vx - bvx) * f; vy = bvy + (vy - bvy) * f;
         }
-      } else if (adhered && contacts[i] >= 1) {
-        // liquid touching the glass: friction, and heat exchange with the room-temperature glass
-        // (so vapour condenses on the walls of a hot jar), unless the jar is insulated
-        Tw = this.insulated ? this.tLoc[i] : P.AMBIENT; gamma = P.WALL_FRICTION;
+      } else if (adhered) {
+        // touching the glass: heat exchange with the room-temperature glass (so vapour condenses
+        // on the walls of a hot jar, and lone adsorbed molecules do not rattle hot in the well),
+        // plus a firm grip on liquid so drops cling
+        Tw = this.insulated ? this.tLoc[i] : P.AMBIENT;
+        gamma = contacts[i] >= 1 ? P.WALL_FRICTION : P.WALL_ACCOM_GAMMA;
       } else if (gamma === 0 && this.convection > 0) {
         // convection: everything exchanges heat with the plate, more strongly near the bottom;
         // liquids and solids also conduct the plate's heat upward through themselves
@@ -940,7 +985,10 @@
     for (let i = 0; i < n; i++) {
       // only in the gas phase: in dense matter the regional field is already accurate
       const w = contacts[i] >= 2 ? 0 : ws;
-      this.tLoc[i] = (1 - w) * tCell[this.cellOfT[i]] + w * this.tSelf[i];
+      const tc = tCell[this.cellOfT[i]];
+      // at a liquid's surface one fast-jiggling molecule is not a fire; in a gas flame it may be
+      const own = condF[i] > 0.3 && this.tSelf[i] > 3 * tc ? 3 * tc : this.tSelf[i];
+      this.tLoc[i] = (1 - w) * tc + w * own;
     }
     // repay local energy debt by gently cooling the particles of indebted cells
     let anyDebt = false;

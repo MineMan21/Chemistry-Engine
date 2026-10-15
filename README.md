@@ -16,7 +16,8 @@ Real world** buttons at the top left, or just scroll):
   (chlorine, bromine, iodine, NO₂) as a tinted haze, while colourless gases stay clear. Clicking
   adds moles here too.
 
-Liquids and solids fall under gravity, land in a pool and spread out. Glass attracts polar
+Liquids fall under gravity, land in a pool and spread out; solids (metals below their melting
+point, salts, covalent networks) fall as lumps and keep their shape until they melt. Glass attracts polar
 molecules, so water climbs into a meniscus, thin films and drops cling to the walls, and vapour
 condenses on the room-temperature glass of a hot jar.
 
@@ -38,10 +39,12 @@ npm test
 | Zoom | Mouse wheel, pinch, `+` / `−`, the Atoms / Moles / Real world buttons, or the buttons at the top right (`F` fits the jar) |
 | Pan | Drag in the jar |
 | Pick an element | Click it in the periodic table |
-| Add atoms | Atom view: click in the jar (1, 5, 20 or 100 per click) |
+| Pick a molecule | Click a chip under **Molecules**: presets (water, CO₂, methane, ammonia, CO, HCl, salt, NaOH, H₂O₂, ethanol, benzene, sulfuric acid) or your own saved ones |
+| Save a molecule | Choose **Inspect**, click any molecule in the jar, then press **Save this molecule** (or `S`). It appears under **My molecules**, kept in this browser; × deletes it |
+| Add atoms or molecules | Atom view: click in the jar (1, 5, 20 or 100 per click) |
 | Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
-| Spark | Spark tool, then click: a short 4000 K burst that also splits some bonds (makes radicals) |
-| Chill | Chill tool, then click: cools a spot to 80 K |
+| Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
+| Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule. Clicking a row in **Contents** pins that species |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
 | Pressure | Vacuum pump toggle; gas can toggle with gas choice and flow rate |

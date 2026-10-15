@@ -464,9 +464,9 @@
         if (len > 40 * s) continue; // wrapped / stretched bond
         const nx = -dy / len, ny = dx / len;
         ctx.strokeStyle = ionic ? 'rgba(255,214,102,0.75)' : 'rgba(200,210,225,0.9)';
-        ctx.lineWidth = order > 1 ? bondW * 0.7 : bondW;
+        ctx.lineWidth = order > 1 ? bondW * 0.6 : bondW;
         if (ionic) ctx.setLineDash([bondW * 1.5, bondW * 1.5]);
-        const gap = bondW * 1.1;
+        const gap = Math.max(3, bondW * 1.7);
         for (let o = 0; o < order; o++) {
           const off = (o - (order - 1) / 2) * gap;
           ctx.beginPath();

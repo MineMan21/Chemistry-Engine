@@ -33,6 +33,7 @@
         <div><span class="label">Reactions</span><span id="ro-rx">0/s</span></div>
       </div>
       <div id="inspector" hidden></div>
+      <button id="save-pinned" class="btn primary" hidden>Save this molecule</button>
       <div id="toast" hidden></div>
     </main>
 
@@ -55,18 +56,27 @@
       <section>
         <h2>Tool</h2>
         <div class="segmented" id="tools">
-          <button data-tool="drop" class="active" title="Drop the selected element">Drop</button>
-          <button data-tool="spark" title="Ignite: heat a spot to 3000 K">Spark</button>
-          <button data-tool="cool" title="Cold finger: chill a spot to 80 K">Chill</button>
-          <button data-tool="inspect" title="Click a molecule to pin its details">Inspect</button>
+          <button data-tool="drop" class="active" title="Add the selected element or molecule">Drop</button>
+          <button data-tool="spark" title="Ignite a spot: 4000 K and splits bonds">Spark</button>
+          <button data-tool="cool" title="Freeze a spot: 80 K">Chill</button>
+          <button data-tool="inspect" title="Pin a molecule to read it or save it">Inspect</button>
         </div>
-        <p class="hint">Scroll to zoom, drag to pan. Zoom in to see atoms and bonds; zoom out for the bulk view.</p>
+        <p class="tool-hint" id="tool-hint"></p>
+        <p class="hint">Scroll to zoom, drag to pan.</p>
       </section>
 
       <section>
         <h2>Elements</h2>
         <div id="ptable" class="ptable" role="grid" aria-label="Periodic table"></div>
         <div id="el-info" class="el-info"></div>
+      </section>
+
+      <section>
+        <h2>Molecules</h2>
+        <div id="mol-presets" class="chips mol-chips"></div>
+        <h3 class="subhead">My molecules</h3>
+        <div id="mol-saved" class="chips mol-chips"></div>
+        <p class="hint" id="mol-hint">Pick Inspect, click any molecule in the jar, then press Save this molecule. Saved molecules stay in this browser.</p>
       </section>
 
       <section id="add-section">
@@ -178,6 +188,7 @@
   <script src="js/appearance.js"></script>
   <script src="js/sim.js"></script>
   <script src="js/render.js"></script>
+  <script src="js/molecules.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
 </body>
