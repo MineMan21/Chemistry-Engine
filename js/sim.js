@@ -32,11 +32,17 @@
     HB_ACCEPT_POW: 2, // ...and of the acceptor side: along the lone pair of a two-bonded O/N/F
     HB_FLAT_LO: 0.6, HB_FLAT_HI: 1.15, // (see HB_FLAT_* note below)
     HH_CONTACT: 0.65, // H...H contact of two O-H/N-H/F-H hydrogens (they overlap in a flattened view)
-    W3_EPS: 2000, // water network angle stiffness (K), see waterAngle()
-    W2_EPS: 1000, // two-body cohesion (K) between neighbouring water oxygens, as in mW water
+    W3_EPS: 500, // water network angle stiffness (K), see waterAngle(); gentle, so the liquid stays
+    // disordered (ice gets its honeycomb from the crystal engine)
+    // cohesion (K per molecule) of water inside liquid or ice: -W2_EPS smoothstep over the number
+    // of neighbouring water oxygens from W2_RHO_A to W2_RHO_B. A pair or a small clump in the
+    // vapour gets none of it, so steam stays a gas of single molecules instead of drifting clusters
+    W2_EPS: 1600,
+    W2_RHO_A: 1.2,
+    W2_RHO_B: 2.8,
     W3_RANGE: 40, // ...its range (units)...
     W3_INNER: 32, // ...full strength out to here, past the hydrogen-bonded O...O distance (~28)
-    W2_RANGE: 40, // range of the two-body cohesion...
+    W2_RANGE: 40, // reach of a water neighbour in that count...
     W2_INNER: 32, // ...and where it starts to fade
     HB_REP_SCALE: 1, // stiffness of the H...acceptor contact relative to other contacts
     HB_CONTACT: 0.78, // hydrogen-bonded H...X pairs may approach to this fraction of contact
@@ -45,8 +51,8 @@
     ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
     ICE_A: 31, // O-O spacing of the ice honeycomb: wide enough that ice takes ~7% more room than the liquid (real: 9%)
     CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites
-    CRYSTAL_TRIES: 0.3, // join/nucleation attempts per atom every 4 substeps
-    CRYSTAL_JOIN_MAX: 250, // a unit joins only if its new spring is strained by at most this (K)
+    CRYSTAL_TRIES: 0.6, // join/nucleation attempts per atom every 4 substeps
+    CRYSTAL_JOIN_MAX: 600, // a unit joins only if its new spring is strained by at most this (K)
     CRYSTAL_HYST: 20, // members melt this far (K) above the melting point
     CRYSTAL_NUC_GLASS: 0.02, // chance per attempt that cold material on the glass starts a crystal
     CRYSTAL_NUC_BULK: 0.0001, // ...and in the bulk
@@ -225,6 +231,7 @@
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
     this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
     this.grab = null; // the grab tool's hold (see grabStart)
+    this.held = new Uint8Array(M); // 1 for atoms the grab tool holds
     this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
     this.fsP = new Float64Array(M); // minus the derivative of its embedding energy
     this.fsI = new Int32Array(8 * M); this.fsJ = new Int32Array(8 * M);
@@ -499,7 +506,7 @@
   S.clear = function () {
     this.n = 0;
     this.grains = [];
-    this.grab = null;
+    this.grabEnd();
     this.tCell.fill(this.plateTemp);
     this.cellDebt.fill(0);
     this.present.fill(0);
@@ -1005,7 +1012,8 @@
         fx[i] -= gx; fy[i] -= gy;
       }
     }
-    if (P.W3_EPS || P.W2_EPS) for (let i = 0; i < n; i++) if (this.isWaterO(i)) this.waterAngle(i, true);
+    if (P.W3_EPS) for (let i = 0; i < n; i++) if (this.isWaterO(i)) this.waterAngle(i, true);
+    if (P.W2_EPS) this.waterDenseForces();
     if (this.grains.length) this.crystalForces();
   };
 
@@ -1021,6 +1029,7 @@
     const cellKE = this.cellKE, cellDebt = this.cellDebt;
     cellKE.fill(0);
     const W = P.W, H = P.H, rng = this.rng, wallG = this.insulated ? 0 : P.WALL_GAMMA;
+    const grab = this.grab, held = grab ? this.held : null;
     let ke = 0, bonds = 0, impulse = 0;
     // bulk (flow) velocity of condensed matter per coarse cell
     const mom = this.cellMom, TC = P.TCELL;
@@ -1066,6 +1075,7 @@
       }
       let g = (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       if (this.nb[i] === 0) g *= metalG[el[i]];
+      if (held && held[i]) g = 0; // the hand carries the weight of what it holds
       g += P.G_GAS;
       this.gAcc[i] = g;
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
@@ -1152,8 +1162,11 @@
         const c1 = Math.exp(-gamma * dt);
         const sd = Math.sqrt((1 - c1 * c1) * P.KB * Tw * im) * dt;
         // cheap unit-variance noise (sum of 3 uniforms); exact Gaussians are not needed here
-        vx = vx * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
-        vy = vy * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
+        // a held body is thermostatted about its own motion, so the plate or glass does not
+        // anchor what the hand is lifting
+        const hvx = held && held[i] ? grab.vx : 0, hvy = held && held[i] ? grab.vy : 0;
+        vx = hvx + (vx - hvx) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
+        vy = hvy + (vy - hvy) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
       }
       px[i] = x[i]; py[i] = y[i];
       x[i] += vx + (this.fx[i] * im + wfx) * dt2;
@@ -1605,7 +1618,8 @@
         U += self.pairPotential(i, j);
       });
     }
-    if (P.W3_EPS || P.W2_EPS) U += this.waterAngleEnergyNear(set, count);
+    if (P.W3_EPS) U += this.waterAngleEnergyNear(set, count);
+    if (P.W2_EPS) U += this.waterDenseEnergyNear(set, count);
     if (P.METAL_DENSE_PER_MP) U += this.metalEnergyNear(set, count);
     return U;
   };
@@ -1688,30 +1702,16 @@
     const L = this._w3 || (this._w3 = []);
     L.length = 0;
     const self = this;
-    this.query(x[i], y[i], Math.max(rc, P.W2_RANGE), function (j) { if (j !== i && self.isWaterO(j)) L.push(j); });
+    this.query(x[i], y[i], rc, function (j) { if (j !== i && self.isWaterO(j)) L.push(j); });
     let U = 0;
     // weights: 1 out to an inner radius (so hydrogen-bonded neighbours feel no radial push from
     // the angle term), then a smooth fade to zero
-    const r1 = P.W3_INNER, iw = 1 / (rc - r1), q1 = P.W2_INNER, iq = 1 / (P.W2_RANGE - q1);
+    const r1 = P.W3_INNER, iw = 1 / (rc - r1);
     function wt(r) { if (r <= r1) return 1; if (r >= rc) return 0; const g = (r - r1) * iw, h = 1 - g * g; return h * h; }
     function dwt(r) { if (r <= r1 || r >= rc) return 0; const g = (r - r1) * iw; return -4 * g * (1 - g * g) * iw; }
-    function wt2(r) { if (r <= q1) return 1; if (r >= P.W2_RANGE) return 0; const g = (r - q1) * iq, h = 1 - g * g; return h * h; }
-    function dwt2(r) { if (r <= q1 || r >= P.W2_RANGE) return 0; const g = (r - q1) * iq; return -4 * g * (1 - g * g) * iq; }
-    const K2 = P.W2_EPS * P.KB;
     for (let p = 0; p < L.length; p++) {
       const j = L[p], ax = x[j] - x[i], ay = y[j] - y[i];
       const ra = Math.sqrt(ax * ax + ay * ay) || 1e-6;
-      // two-body cohesion between water oxygens (each pair once, from its lower-index end); it
-      // reaches past the first shell, so a liquid that crowds molecules in closer than the far side
-      // of ice's hexagons (4.8 A) gains from it and water is denser than ice
-      if (K2 && j > i && (!inSet || inSet[i] === tag || inSet[j] === tag)) {
-        U -= K2 * wt2(ra);
-        const d2 = dwt2(ra);
-        if (forces && d2) {
-          const f2 = -K2 * d2 / ra; // -dU/dr along i->j, divided by r
-          fx[j] -= f2 * ax; fy[j] -= f2 * ay; fx[i] += f2 * ax; fy[i] += f2 * ay;
-        }
-      }
       const fa = wt(ra), dfa = dwt(ra);
       if (!fa) continue;
       for (let r = p + 1; r < L.length; r++) {
@@ -1749,12 +1749,93 @@
     if (!any) return 0;
     for (let a = 0; a < count; a++) {
       const i = set[a];
-      this.query(this.x[i], this.y[i], Math.max(P.W3_RANGE, P.W2_RANGE) + 8, function (j) {
+      this.query(this.x[i], this.y[i], P.W3_RANGE + 8, function (j) {
         if (stamp[j] !== t && self.isWaterO(j)) { stamp[j] = t; centres.push(j); }
       });
     }
     let U = 0;
     for (let k = 0; k < centres.length; k++) U += this.waterAngle(centres[k], false, mark, t);
+    return U;
+  };
+
+  // Dense-water cohesion (see W2_EPS): each water oxygen's neighbour count rho is a sum of
+  // w(r) = 1 out to W2_INNER, fading to 0 at W2_RANGE; its energy is F(rho) = -C smoothstep.
+  function w2(r) { if (r <= P.W2_INNER) return 1; if (r >= P.W2_RANGE) return 0; const g = (r - P.W2_INNER) / (P.W2_RANGE - P.W2_INNER), h = 1 - g * g; return h * h; }
+  function dw2(r) { if (r <= P.W2_INNER || r >= P.W2_RANGE) return 0; const iq = 1 / (P.W2_RANGE - P.W2_INNER), g = (r - P.W2_INNER) * iq; return -4 * g * (1 - g * g) * iq; }
+  function w2F(r) {
+    const t = (r - P.W2_RHO_A) / (P.W2_RHO_B - P.W2_RHO_A);
+    return t <= 0 ? 0 : t >= 1 ? -P.W2_EPS * P.KB : -P.W2_EPS * P.KB * t * t * (3 - 2 * t);
+  }
+  function w2dF(r) {
+    const t = (r - P.W2_RHO_A) / (P.W2_RHO_B - P.W2_RHO_A);
+    return t <= 0 || t >= 1 ? 0 : -P.W2_EPS * P.KB * 6 * t * (1 - t) / (P.W2_RHO_B - P.W2_RHO_A);
+  }
+  S.waterDenseForces = function () {
+    const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, self = this;
+    const rho = this.wRho || (this.wRho = new Float64Array(P.MAX));
+    const pi = this.wPI || (this.wPI = []), pj = this.wPJ || (this.wPJ = []), pd = this.wPD || (this.wPD = []);
+    pi.length = pj.length = pd.length = 0;
+    const isW = this.wIs || (this.wIs = new Uint8Array(P.MAX));
+    for (let i = 0; i < n; i++) { isW[i] = this.isWaterO(i) ? 1 : 0; rho[i] = 0; }
+    const R = P.W2_RANGE;
+    for (let i = 0; i < n; i++) {
+      if (!isW[i]) continue;
+      this.query(x[i], y[i], R, function (j) {
+        if (j <= i || !isW[j]) return;
+        const dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
+        if (d2 >= R * R) return;
+        const d = Math.sqrt(d2) || 1e-6, w = w2(d);
+        rho[i] += w; rho[j] += w;
+        const dw = dw2(d);
+        if (dw) { pi.push(i); pj.push(j); pd.push(dw / d, dx, dy); }
+      });
+    }
+    for (let k = 0; k < pi.length; k++) {
+      const i = pi[k], j = pj[k];
+      const c = (w2dF(rho[i]) + w2dF(rho[j])) * pd[3 * k]; // dU/dr / r
+      const gx = c * pd[3 * k + 1], gy = c * pd[3 * k + 2];
+      fx[j] -= gx; fy[j] -= gy; fx[i] += gx; fy[i] += gy;
+    }
+  };
+  // water-oxygen density of i: all neighbours, or only stamped (sign > 0) / unstamped (sign < 0)
+  S.waterRho = function (i, mark, tag, sign) {
+    if (!this.isWaterO(i)) return 0;
+    const x = this.x, y = this.y, self = this, R = P.W2_RANGE;
+    let r = 0;
+    this.query(x[i], y[i], R, function (j) {
+      if (j === i || !self.isWaterO(j)) return;
+      if (sign && (mark[j] === tag) !== (sign > 0)) return;
+      const dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
+      if (d2 < R * R) r += w2(Math.sqrt(d2));
+    });
+    return r;
+  };
+  // Dense-water energy that a change of the atoms in set can affect (exact differences, as for
+  // metals): their own, plus their water neighbours' relative to the density without the set.
+  S.waterDenseEnergyNear = function (set, count) {
+    let any = false;
+    for (let a = 0; a < count; a++) if (this.el[set[a]] === 8) { any = true; break; }
+    if (!any) return 0;
+    const mark = this.mark, tag = ++this.markTag, tag2 = ++this.markTag, self = this;
+    const listed = this._wListed || (this._wListed = new Int32Array(P.MAX));
+    const near = this._wNear || (this._wNear = []);
+    near.length = 0;
+    for (let a = 0; a < count; a++) mark[set[a]] = tag;
+    let U = 0;
+    for (let a = 0; a < count; a++) {
+      const i = set[a];
+      if (!this.isWaterO(i)) continue;
+      U += w2F(this.waterRho(i));
+      this.query(this.x[i], this.y[i], P.W2_RANGE, function (j) {
+        if (mark[j] !== tag && listed[j] !== tag2 && self.isWaterO(j)) { listed[j] = tag2; near.push(j); }
+      });
+    }
+    for (const j of near) {
+      const rIn = this.waterRho(j, mark, tag, 1);
+      if (rIn === 0) continue;
+      const rOut = this.waterRho(j, mark, tag, -1);
+      U += w2F(rIn + rOut) - w2F(rOut);
+    }
     return U;
   };
 
@@ -2412,9 +2493,11 @@
   // ---------------------------------------------------------------------------------------
   // Grab: the user picks up the material under the cursor and drags it. The grabbed atoms share
   // one uniform pull (a critically damped spring from their centre of mass to the hand, capped),
-  // so their own thermal motion is left alone and nothing is heated or frozen by holding it;
-  // everything else follows only through its own cohesion, so a solid lifts as a lump, a liquid
-  // stretches and drips, and a gas slips away.
+  // so their own thermal motion is left alone and nothing is heated or frozen by holding it.
+  // A solid is held as a whole: grabbing any part of it takes the entire connected solid body
+  // (a hand cannot tear iron or snap an ice cube's lattice), which the even pull then moves
+  // without straining it. A liquid is held only where it is grabbed and the rest follows through
+  // its own cohesion, so it stretches, necks and drips; a gas slips away.
   // ---------------------------------------------------------------------------------------
   S.grabStart = function (x, y, r) {
     this.buildGrid();
@@ -2425,12 +2508,48 @@
       if (dx * dx + dy * dy < r * r) atoms.push(j);
     });
     if (!atoms.length) { this.grab = null; return 0; }
+    this.grabSolidBodies(atoms);
     let cx = 0, cy = 0;
     for (const j of atoms) { cx += this.x[j]; cy += this.y[j]; }
     cx /= atoms.length; cy /= atoms.length;
     // the hand holds the patch where it was taken: target = hand + (centre - hand at the start)
-    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time };
+    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0 };
+    this.held.fill(0);
+    for (const j of atoms) this.held[j] = 1;
     return atoms.length;
+  };
+  // Extends `atoms` with every solid atom connected (in contact or bonded) to a grabbed solid atom.
+  S.grabSolidBodies = function (atoms) {
+    const mark = this.mark, tag = ++this.markTag, self = this, MB = P.MAXB;
+    for (const i of atoms) mark[i] = tag;
+    // solid: in a crystal grain (or well below the melting point) for substances that crystallise,
+    // so a cool spot in a melt does not count; otherwise the usual solid test
+    const solid = function (i) {
+      let c = i, kind = self.crystalKind(i);
+      if (!kind && self.nb[i] === 1 && self.isWaterO(self.bp[i * MB])) { c = self.bp[i * MB]; kind = 1; }
+      if (!kind) return self.isSolidAtom(i);
+      return self.grainOf[c] >= 0 || self.tLoc[c] < self.crystalMeltT(c, kind) - 100;
+    };
+    const queue = atoms.filter(solid);
+    while (queue.length && atoms.length < P.MAX) {
+      const i = queue.pop(), ei = this.el[i];
+      const add = function (j) {
+        if (mark[j] === tag || !solid(j)) return;
+        mark[j] = tag; atoms.push(j); queue.push(j);
+      };
+      for (let k = 0; k < this.nb[i]; k++) add(this.bp[i * MB + k]);
+      this.query(this.x[i], this.y[i], this.cellSize, function (j) {
+        if (j === i) return;
+        const r = pairSigma[ei * NZ + self.el[j]] * 1.3;
+        const dx = self.x[j] - self.x[i], dy = self.y[j] - self.y[i];
+        if (dx * dx + dy * dy < r * r) add(j);
+      });
+    }
+    // a molecule moves whole: its bonded atoms (the H of ice) come along
+    for (let a = 0, len = atoms.length; a < len; a++) {
+      const i = atoms[a];
+      for (let k = 0; k < this.nb[i]; k++) { const j = this.bp[i * MB + k]; if (mark[j] !== tag) { mark[j] = tag; atoms.push(j); } }
+    }
   };
   S.grabMove = function (x, y) {
     const g = this.grab;
@@ -2440,7 +2559,7 @@
     g.vhx += 0.5 * ((x - g.hx) / dtw - g.vhx); g.vhy += 0.5 * ((y - g.hy) / dtw - g.vhy);
     g.hx = x; g.hy = y; g.t = this.time;
   };
-  S.grabEnd = function () { this.grab = null; };
+  S.grabEnd = function () { this.grab = null; this.held.fill(0); };
   S.grabForces = function () {
     const g = this.grab, A = g.atoms, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
     if (this.time - g.t > 0.05) { g.vhx *= 0.9; g.vhy *= 0.9; } // the hand has stopped
@@ -2450,7 +2569,9 @@
       M += m; cx += m * x[i]; cy += m * y[i]; vx += m * (x[i] - px[i]); vy += m * (y[i] - py[i]);
     }
     if (!M) return;
-    cx /= M; cy /= M; vx /= M * P.DT; vy /= M * P.DT;
+    cx /= M; cy /= M;
+    g.vx = vx / M; g.vy = vy / M; // the held body's velocity, per substep (for the thermostats)
+    vx /= M * P.DT; vy /= M * P.DT;
     const w = P.GRAB_OMEGA;
     let ax = w * w * (g.hx + g.ox - cx) - 2 * w * (vx - g.vhx);
     let ay = w * w * (g.hy + g.oy - cy) - 2 * w * (vy - g.vhy);
@@ -2464,11 +2585,12 @@
   // particle `from` moved into slot `to` (to is being removed and from is the last one)
   S.grabRenumber = function (to, from) {
     const A = this.grab.atoms;
+    this.held[to] = this.held[from]; this.held[from] = 0;
     const k = A.indexOf(to);
     if (k >= 0) { A[k] = A[A.length - 1]; A.pop(); }
     const m = A.indexOf(from);
     if (m >= 0) A[m] = to;
-    if (!A.length) this.grab = null;
+    if (!A.length) this.grabEnd();
   };
 
   S.updateGauges = function (elapsed) {

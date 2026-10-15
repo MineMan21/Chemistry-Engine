@@ -306,7 +306,7 @@ test('mercury is a liquid at room temperature', function () {
   assert.ok(s.vapour < 0.05, 'mercury stays mostly liquid: ' + JSON.stringify(s));
 });
 
-test('the grab tool lifts a solid iron lump in one piece', function () {
+test('the grab tool lifts a solid iron lump in one piece from a small grip', function () {
   const sim = newSim(24);
   const fe = Z('Fe');
   sim.addMoles(fe, 0.3, P.W / 2, P.H - 150);
@@ -315,7 +315,8 @@ test('the grab tool lifts a solid iron lump in one piece', function () {
   for (let i = 0; i < sim.n; i++) top = Math.min(top, sim.y[i]);
   for (let i = 0; i < sim.n; i++) if (sim.y[i] < top + 60) { cx += sim.x[i]; c++; }
   cx /= c;
-  assert.ok(sim.grabStart(cx, top + 70, 150) > 20, 'grabbed a handful of atoms');
+  // a small grip on a solid takes the whole connected solid
+  assert.strictEqual(sim.grabStart(cx, top + 70, 40), sim.n, 'the whole solid lump is held');
   const steps = Math.round(3 / P.DT);
   for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 70 - 900 * s / steps); sim.step(6); }
   run(sim, 1);
