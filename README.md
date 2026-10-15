@@ -45,7 +45,8 @@ npm test
 | Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
-| Inspect | Hover any atom; with the Inspect tool, click to pin a molecule. Clicking a row in **Contents** pins that species |
+| Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
+| Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
 | Pressure | Vacuum pump toggle with a strength slider (2–95% of the gas per second); gas can toggle with gas choice and flow rate |
 | Pause | Space |

@@ -75,7 +75,7 @@
     return 'rgb(' + (c & 255) + ',' + ((c >> 8) & 255) + ',' + ((c >> 16) & 255) + ')';
   }
 
-  UI.renderContents = function (container, species, onPick) {
+  UI.renderContents = function (container, species, onPick, selectedKey) {
     container.innerHTML = '';
     if (!species || !species.length) {
       container.appendChild(el('div', 'empty', 'The jar is empty. Pick an element and drop some in.'));
@@ -90,9 +90,15 @@
       nm.lastChild.textContent = s.name || '';
       const mol = el('span', 'mol', formatMol(s.mol));
       const ph = el('span', 'ph', s.phase === 'gas' ? 'gas' : 'liq/sol');
-      row.title = (s.name ? s.name + ' · ' : '') + s.molecules + ' particles';
+      row.title = (s.name ? s.name + ' · ' : '') + s.molecules + ' particles · click to highlight them in the jar';
       row.append(sw, nm, mol, ph);
-      row.addEventListener('click', function () { onPick(s); });
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
+      if (s.key === selectedKey) { row.classList.add('selected'); row.setAttribute('aria-pressed', 'true'); }
+      // pointerdown, not click: the list is rebuilt a few times a second and a click whose press
+      // and release land on different copies of the row would be lost
+      row.addEventListener('pointerdown', function (e) { if (e.button === 0) onPick(s); });
+      row.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPick(s); } });
       container.appendChild(row);
     });
     if (species.length > 18) container.appendChild(el('div', 'empty', '+ ' + (species.length - 18) + ' more species'));

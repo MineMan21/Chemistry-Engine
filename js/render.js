@@ -28,6 +28,7 @@
     this.colorMode = 'molecule';
     this.hover = -1;
     this.highlight = null; // Set of atom indices to outline
+    this.focus = null; // per-atom mask (1 = part of the species picked in Contents); others dim
     this.showCharges = true;
     this.pixelCanvas = document.createElement('canvas');
     this.pixelCtx = this.pixelCanvas.getContext('2d');
@@ -114,6 +115,7 @@
       const mix = this.realMix();
       if (mix < 1) this.drawPixels(ctx, 1 - mix);
       if (mix > 0) this.drawReal(ctx, mix);
+      if (mix > 0 && this.focus) this.drawFocusDots(ctx, mix);
     }
 
     ctx.save();
@@ -284,12 +286,13 @@
     const colors = this.colorMode === 'element' ? null : sim.molColor;
     const elColor = CE.Simulation.elColor;
     const x = sim.x, y = sim.y, el = sim.el;
-    const hl = this.highlight;
+    const hl = this.highlight, focus = this.focus;
     for (let i = 0; i < n; i++) {
       const px = Math.floor(x[i] * s + ox), py = Math.floor(y[i] * s + oy);
       const size = Math.max(1, Math.round(E[el[i]].radius * 1.2 * s));
       if (px < -size || py < -size || px >= w + size || py >= h + size) continue;
       let col = colors ? colors[i] : elColor[el[i]];
+      if (focus) col = focus[i] ? 0xff00ffff : (col & 0x00ffffff) | 0x30000000; // picked: yellow, rest faint
       if (hl && hl.has(i)) col = 0xff00ffff; // yellow
       const x0 = Math.max(0, px - (size >> 1)), y0 = Math.max(0, py - (size >> 1));
       const x1 = Math.min(w, x0 + size), y1 = Math.min(h, y0 + size);
@@ -435,6 +438,25 @@
   }
 
   // Zoomed in: ball-and-stick atoms with bonds.
+  // Real-world view: the picked species is marked with a yellow dot per atom on top of the
+  // material, so you can see where it is (e.g. which part of a pool is water).
+  R.drawFocusDots = function (ctx, alpha) {
+    const sim = this.sim, n = sim.n, focus = this.focus, s = this.cam.scale;
+    const ox = this.width / 2 - this.cam.x * s, oy = this.height / 2 - this.cam.y * s;
+    const d = 2.5;
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffeb3b';
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      if (!focus[i]) continue;
+      ctx.rect(sim.x[i] * s + ox - d / 2, sim.y[i] * s + oy - d / 2, d, d);
+    }
+    ctx.fill();
+    ctx.restore();
+  };
+
   R.drawAtoms = function (ctx) {
     const sim = this.sim, n = sim.n, MB = P.MAXB;
     const s = this.cam.scale;
@@ -450,6 +472,7 @@
     }
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const focus = this.focus;
     // bonds
     ctx.lineCap = 'round';
     const bondW = Math.max(1, 1.6 * s);
@@ -463,6 +486,7 @@
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
         if (len > 40 * s) continue; // wrapped / stretched bond
         const nx = -dy / len, ny = dx / len;
+        ctx.globalAlpha = focus && !focus[i] ? 0.15 : 1;
         ctx.strokeStyle = ionic ? 'rgba(255,214,102,0.75)' : 'rgba(200,210,225,0.9)';
         ctx.lineWidth = order > 1 ? bondW * 0.6 : bondW;
         if (ionic) ctx.setLineDash([bondW * 1.5, bondW * 1.5]);
@@ -485,12 +509,13 @@
       if (!visible[i]) continue;
       const z = el[i];
       const r = E[z].radius * 0.42 * s;
+      ctx.globalAlpha = focus && !focus[i] ? 0.15 : 1;
       ctx.fillStyle = this.colorMode === 'element' || r > 6 ? this.elColorCss[z] : cssFromPacked(sim.molColor[i]);
       ctx.beginPath(); ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2); ctx.fill();
       if (r > 5) {
         ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = Math.max(0.5, r * 0.08); ctx.stroke();
       }
-      if (hl && hl.has(i)) {
+      if ((hl && hl.has(i)) || (focus && focus[i])) {
         ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = Math.max(1.5, r * 0.18);
         ctx.beginPath(); ctx.arc(sx[i], sy[i], r + Math.max(2, r * 0.2), 0, Math.PI * 2); ctx.stroke();
       }

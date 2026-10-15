@@ -199,6 +199,8 @@ output { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums;
 .contents { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .contents .sp { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
 .contents .sp:hover { background: var(--panel-2); }
+.contents .sp.selected { background: var(--panel-2); box-shadow: inset 0 0 0 1px #ffeb3b; }
+.contents .sp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .contents .sw { width: 12px; height: 12px; border-radius: 3px; }
 .contents .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contents .nm small { color: var(--muted); }
