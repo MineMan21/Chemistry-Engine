@@ -12,7 +12,14 @@
     <main id="stage">
       <canvas id="view" aria-label="Simulation jar"></canvas>
       <div id="hud">
-        <div id="mode-badge" class="badge"></div>
+        <div class="hud-left">
+          <div class="segmented tiers" id="tiers" role="group" aria-label="Zoom level">
+            <button data-tier="atoms" title="Atoms and bonds">Atoms</button>
+            <button data-tier="moles" title="One dot per particle (1 mmol)">Moles</button>
+            <button data-tier="real" title="What the jar looks like to the eye">Real world</button>
+          </div>
+          <div id="mode-badge" class="badge"></div>
+        </div>
         <div class="hud-buttons">
           <button id="zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
           <button id="zoom-out" class="icon-btn" title="Zoom out (−)">−</button>
@@ -142,7 +149,8 @@
             <option value="">Choose a setup…</option>
             <option value="h2o2">Hydrogen + oxygen (spark it!)</option>
             <option value="nacl">Sodium + chlorine → salt</option>
-            <option value="water">Liquid water (boil it)</option>
+            <option value="water">Drop a blob of water</option>
+            <option value="steam">Steam on cold glass</option>
             <option value="methane">Methane + oxygen (spark it!)</option>
             <option value="rust">Iron in hot oxygen</option>
             <option value="carbon">Carbon + oxygen (coal)</option>
@@ -167,6 +175,7 @@
 
   <script src="js/elements.js"></script>
   <script src="js/chemistry.js"></script>
+  <script src="js/appearance.js"></script>
   <script src="js/sim.js"></script>
   <script src="js/render.js"></script>
   <script src="js/ui.js"></script>

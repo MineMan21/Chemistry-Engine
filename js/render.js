@@ -8,8 +8,15 @@
   const P = CE.Simulation.params;
   const NZ = CE.chem.NZ;
 
-  // Screen radius (px) of a typical atom above which the full atom view is drawn.
-  const ATOM_VIEW_PX = 3.2;
+  // Zoom tiers (camera scale = screen px per world unit, 1 unit = 10 pm):
+  //   atoms      scale >= ATOM_SCALE   ball-and-stick atoms and bonds
+  //   moles      in between            one pixel per atom, coloured by molecule
+  //   real world scale <= REAL_FULL    substances drawn as they look (liquid, solid, tinted gas)
+  // The mole and real-world views cross-fade between REAL_FULL and REAL_START.
+  const ATOM_SCALE = 0.64, REAL_START = 0.25, REAL_FULL = 0.19;
+  const ATOM_VIEW_PX = 7 * ATOM_SCALE;
+  // In the real-world view the jar is drawn as a 24 cm wide jar: 1 world unit = 0.1 mm.
+  const REAL_UNITS_PER_CM = 100;
 
   function Renderer(canvas, sim) {
     this.canvas = canvas;
@@ -51,7 +58,7 @@
   R.fit = function () {
     // apparatus spans x: -1100 .. W + 800, y: -1700 .. H + 420
     const x0 = -1150, x1 = P.W + 850, y0 = -1750, y1 = P.H + 450;
-    this.cam.scale = Math.min(this.width / (x1 - x0), this.height / (y1 - y0)) * 0.97;
+    this.cam.scale = Math.min(this.width / (x1 - x0), this.height / (y1 - y0), REAL_FULL) * 0.97;
     this.cam.x = (x0 + x1) / 2;
     this.cam.y = (y0 + y1) / 2;
   };
@@ -72,7 +79,11 @@
     this.cam.y += before[1] - after[1];
   };
   // Atom view when a carbon-sized atom would be at least a few pixels across.
-  R.isAtomView = function () { return 7 * this.cam.scale >= ATOM_VIEW_PX; };
+  R.isAtomView = function () { return this.cam.scale >= ATOM_SCALE; };
+  // 0 = mole (pixel) view, 1 = real-world view, in between while cross-fading
+  R.realMix = function () { return Math.min(1, Math.max(0, (REAL_START - this.cam.scale) / (REAL_START - REAL_FULL))); };
+  R.tier = function () { return this.isAtomView() ? 'atoms' : this.realMix() >= 0.5 ? 'real' : 'moles'; };
+  Renderer.TIER_SCALE = { atoms: 2.2, moles: 0.38, real: 0 }; // 0 = fit the apparatus
 
   R.addSpark = function (x, y) { this.sparks.push({ x: x, y: y, t: 0 }); };
 
@@ -99,7 +110,11 @@
     ctx.restore();
 
     if (this.isAtomView()) this.drawAtoms(ctx);
-    else this.drawPixels(ctx);
+    else {
+      const mix = this.realMix();
+      if (mix < 1) this.drawPixels(ctx, 1 - mix);
+      if (mix > 0) this.drawReal(ctx, mix);
+    }
 
     ctx.save();
     ctx.translate(this.width / 2, this.height / 2);
@@ -251,7 +266,7 @@
   };
 
   // Zoomed out: one pixel (or small square) per atom.
-  R.drawPixels = function (ctx) {
+  R.drawPixels = function (ctx, alpha) {
     const sim = this.sim, n = sim.n;
     const w = Math.ceil(this.width * this.dpr), h = Math.ceil(this.height * this.dpr);
     if (this.pixelCanvas.width !== w || this.pixelCanvas.height !== h) {
@@ -287,9 +302,137 @@
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
     ctx.drawImage(this.pixelCanvas, 0, 0);
     ctx.restore();
   };
+
+  // Real-world view: atoms are splatted onto a coarse grid, blurred into continuous material and
+  // shaded by what the substance looks like (translucent liquid with a bright surface, opaque
+  // solid, tinted gas). The simulation underneath is unchanged.
+  R.drawReal = function (ctx, alpha) {
+    const sim = this.sim, n = sim.n, W = P.W, H = P.H;
+    const cw = Math.max(6, 2.6 / this.cam.scale); // grid cell in world units (~2.6 screen px)
+    const gw = Math.ceil(W / cw), gh = Math.ceil(H / cw), N = gw * gh;
+    if (!this._rg || this._rg.N !== N) {
+      const ch = [];
+      for (let k = 0; k < 11; k++) ch.push(new Float32Array(N));
+      this._rg = { N: N, ch: ch, tmp: new Float32Array(N) };
+      this.realCanvas = document.createElement('canvas');
+      this.realCanvas.width = gw; this.realCanvas.height = gh;
+      this.realCtx = this.realCanvas.getContext('2d');
+      this.realImg = this.realCtx.createImageData(gw, gh);
+    }
+    // channels: 0 density, 1-3 colour, 4 opacity, 5 solid, 6 gas strength, 7-9 gas colour, 10 heat
+    const ch = this._rg.ch;
+    for (let k = 0; k < 11; k++) ch[k].fill(0);
+    const [dens, cr, cg, cb, cop, csol, ga, gr, gg, gb] = ch;
+    const species = sim.species || [], spIdx = sim.spIdx, x = sim.x, y = sim.y, el = sim.el;
+    const area = 1 / (cw * cw);
+    for (let i = 0; i < n; i++) {
+      const sp = spIdx ? species[spIdx[i]] : null;
+      const look = sp && sp.look;
+      if (!look) continue;
+      let gx = Math.floor(x[i] / cw), gy = Math.floor(y[i] / cw);
+      if (gx < 0) gx = 0; else if (gx >= gw) gx = gw - 1;
+      if (gy < 0) gy = 0; else if (gy >= gh) gy = gh - 1;
+      const c = gy * gw + gx;
+      const r = E[el[i]].radius;
+      const w = Math.PI * r * r * area;
+      // drawn as liquid/solid only when genuinely packed (several neighbours, persistently), so a
+      // few gas molecules that happen to touch stay invisible vapour
+      if ((sim.condF[i] > 0.6 && sim.contacts[i] >= 2) || (sim.nb[i] >= 2 && sim.contacts[i] >= 1) || sim.condF[i] > 0.9) {
+        dens[c] += w;
+        cr[c] += look.rgb[0] * w; cg[c] += look.rgb[1] * w; cb[c] += look.rgb[2] * w;
+        cop[c] += look.opacity * w; csol[c] += (look.solid ? 1 : 0) * w;
+      } else if (look.gas > 0) {
+        const s = look.gas * w;
+        ga[c] += s; gr[c] += look.rgb[0] * s; gg[c] += look.rgb[1] * s; gb[c] += look.rgb[2] * s;
+      }
+    }
+    const R0 = Math.max(1, Math.round(20 / cw)), RG = Math.max(3, Math.round(160 / cw));
+    for (let k = 0; k <= 5; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
+    for (let k = 6; k <= 9; k++) { boxBlur(ch[k], gw, gh, RG, this._rg.tmp); boxBlur(ch[k], gw, gh, RG, this._rg.tmp); }
+    const img = this.realImg.data;
+    for (let gy = 0; gy < gh; gy++) {
+      for (let gx = 0; gx < gw; gx++) {
+        const c = gy * gw + gx, o = c * 4;
+        // tinted gas
+        let R = 0, G = 0, B = 0, A = 0;
+        if (ga[c] > 1e-4) {
+          A = Math.min(0.7, ga[c] * 1.6);
+          R = gr[c] / ga[c]; G = gg[c] / ga[c]; B = gb[c] / ga[c];
+        }
+        // liquids and solids
+        const d = dens[c];
+        const cov = smooth(0.3, 0.55, d);
+        if (cov > 0) {
+          let r = cr[c] / d, g = cg[c] / d, b = cb[c] / d;
+          const solid = csol[c] / d > 0.5;
+          let a = solid ? cov : cov * Math.min(1, cop[c] / d);
+          // light from above: brighten upward-facing surfaces, darken undersides
+          const up = gy > 0 ? dens[c - gw] : 0, down = gy < gh - 1 ? dens[c + gw] : d;
+          const edge = smooth(0.15, 0.5, d - up) - 0.6 * smooth(0.15, 0.5, d - down);
+          const lift = solid ? 0.2 * edge : 0.7 * edge;
+          if (lift > 0) { r += (255 - r) * lift; g += (255 - g) * lift; b += (255 - b) * lift; a = Math.min(1, a + 0.45 * lift); }
+          else { r *= 1 + lift * 0.35; g *= 1 + lift * 0.35; b *= 1 + lift * 0.35; }
+          // composite the material over the gas
+          const outA = a + A * (1 - a);
+          if (outA > 0) {
+            R = (r * a + R * A * (1 - a)) / outA; G = (g * a + G * A * (1 - a)) / outA; B = (b * a + B * A * (1 - a)) / outA;
+          }
+          A = outA;
+        }
+        img[o] = R; img[o + 1] = G; img[o + 2] = B; img[o + 3] = A * 255;
+      }
+    }
+    this.realCtx.putImageData(this.realImg, 0, 0);
+    ctx.save();
+    ctx.translate(this.width / 2, this.height / 2);
+    ctx.scale(this.cam.scale, this.cam.scale);
+    ctx.translate(-this.cam.x, -this.cam.y);
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.realCanvas, 0, 0, gw * cw, gh * cw);
+    // glass reflections
+    const glare = ctx.createLinearGradient(0, 0, W, 0);
+    glare.addColorStop(0, 'rgba(255,255,255,0.10)');
+    glare.addColorStop(0.08, 'rgba(255,255,255,0.02)');
+    glare.addColorStop(0.85, 'rgba(255,255,255,0)');
+    glare.addColorStop(0.93, 'rgba(255,255,255,0.07)');
+    glare.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glare;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  };
+
+  function smooth(a, b, v) {
+    const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // In-place separable box blur (running sums), radius r cells.
+  function boxBlur(a, w, h, r, tmp) {
+    const inv = 1 / (2 * r + 1);
+    for (let yy = 0; yy < h; yy++) {
+      const row = yy * w;
+      let sum = 0;
+      for (let k = -r; k <= r; k++) sum += a[row + Math.min(w - 1, Math.max(0, k))];
+      for (let xx = 0; xx < w; xx++) {
+        tmp[row + xx] = sum * inv;
+        sum += a[row + Math.min(w - 1, xx + r + 1)] - a[row + Math.max(0, xx - r)];
+      }
+    }
+    for (let xx = 0; xx < w; xx++) {
+      let sum = 0;
+      for (let k = -r; k <= r; k++) sum += tmp[Math.min(h - 1, Math.max(0, k)) * w + xx];
+      for (let yy = 0; yy < h; yy++) {
+        a[yy * w + xx] = sum * inv;
+        sum += tmp[Math.min(h - 1, yy + r + 1) * w + xx] - tmp[Math.max(0, yy - r) * w + xx];
+      }
+    }
+  }
 
   // Zoomed in: ball-and-stick atoms with bonds.
   R.drawAtoms = function (ctx) {
@@ -386,19 +529,29 @@
   }
 
   R.drawScaleBar = function (ctx) {
+    if (this.realMix() >= 0.5) {
+      const pxPerCm = this.cam.scale * REAL_UNITS_PER_CM;
+      const optsCm = [0.5, 1, 2, 5, 10, 20, 50];
+      let Lc = optsCm[0];
+      for (let k = 0; k < optsCm.length; k++) if (optsCm[k] * pxPerCm <= 140) Lc = optsCm[k];
+      return this.drawBar(ctx, Lc * pxPerCm, Lc + ' cm');
+    }
     // choose a round length in nm (1 world unit = 10 pm = 0.01 nm)
     const pxPerNm = this.cam.scale * 100;
     const opts = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
     let L = opts[0];
     for (let k = 0; k < opts.length; k++) if (opts[k] * pxPerNm <= 140) L = opts[k];
-    const w = L * pxPerNm;
+    this.drawBar(ctx, L * pxPerNm, L < 1 ? (L * 10) + ' Å' : L + ' nm');
+  };
+
+  R.drawBar = function (ctx, w, label) {
     const x0 = 16, y0 = this.height - 22;
     ctx.strokeStyle = this.theme.text; ctx.fillStyle = this.theme.text; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + w, y0);
     ctx.moveTo(x0, y0 - 5); ctx.lineTo(x0, y0 + 5); ctx.moveTo(x0 + w, y0 - 5); ctx.lineTo(x0 + w, y0 + 5);
     ctx.stroke();
     ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-    ctx.fillText((L < 1 ? (L * 10) + ' Å' : L + ' nm'), x0, y0 - 6);
+    ctx.fillText(label, x0, y0 - 6);
   };
 
   function roundRect(ctx, x, y, w, h, r) {

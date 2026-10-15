@@ -125,6 +125,26 @@ test('water is liquid at 300 K and boils away on a hot plate', function () {
   assert.ok(hot < cold - 0.2, 'liquid fraction at 520 K ' + hot);
 });
 
+test('liquid water falls under gravity and wets the glass', function () {
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const sim = newSim(10);
+  sim.react = function () {}; sim.bondEvents = function () {};
+  sim.addMolecules(H2O, 500, P.W / 2, P.H * 0.3, { x: 250, y: 150 });
+  function meanY() { let s = 0, c = 0; for (let i = 0; i < sim.n; i++) if (sim.el[i] === 8) { s += sim.y[i]; c++; } return s / c; }
+  const y0 = meanY();
+  run(sim, 6);
+  assert.ok(meanY() > y0 + 1000, 'water fell ' + (meanY() - y0) + ' units');
+  assert.ok(sim.temperature < 380, 'falling did not overheat it (' + sim.temperature + ' K)');
+  // a thin film placed against the glass stays there
+  const film = newSim(11);
+  film.react = function () {}; film.bondEvents = function () {};
+  const placed = film.addMolecules(H2O, 200, 30, P.H * 0.35, { x: 18, y: 600 });
+  run(film, 3);
+  let atWall = 0;
+  for (let i = 0; i < film.n; i++) if (film.el[i] === 8 && film.x[i] < 60 && film.y[i] < P.H * 0.6) atWall++;
+  assert.ok(atWall >= 0.6 * placed, 'molecules still clinging to the glass: ' + atWall + ' of ' + placed);
+});
+
 test('the vacuum pump removes gas and the gas can adds it', function () {
   const sim = newSim(8);
   sim.addMoles(Z('Ar'), 0.5, P.W / 2, P.H / 2);

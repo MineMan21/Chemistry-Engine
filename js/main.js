@@ -112,6 +112,20 @@
   $('zoom-in').addEventListener('click', function () { renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1.6); });
   $('zoom-out').addEventListener('click', function () { renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1 / 1.6); });
   $('zoom-fit').addEventListener('click', function () { renderer.fit(); });
+  // zoom-level switcher: jump to the atoms, moles or real-world view around the current spot
+  document.querySelectorAll('#tiers button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const target = CE.Renderer.TIER_SCALE[b.dataset.tier];
+      if (!target) { renderer.fit(); return; }
+      const cx = Math.min(P.W - 50, Math.max(50, renderer.cam.x));
+      let cy = Math.min(P.H - 50, Math.max(50, renderer.cam.y));
+      if (b.dataset.tier === 'atoms' && renderer.realMix() > 0) {
+        // coming from far out: look where the material is (the lowest stuff in the jar)
+        cy = P.H - 0.4 * renderer.height / target;
+      }
+      renderer.cam.scale = target; renderer.cam.x = cx; renderer.cam.y = Math.max(cy, 50);
+    });
+  });
 
   // ------------------------------------------------------------------ presets
   const TEMPLATES = {
@@ -123,8 +137,10 @@
       setPlate(293); sim.addMoles(1, 1, P.W / 2, P.H * 0.35); sim.addMoles(8, 0.5, P.W / 2, P.H * 0.65); } },
     nacl: { text: 'Sodium metal reacts with chlorine gas: watch Na–Cl ionic bonds and salt crystals form.', run: function () {
       setPlate(293); sim.addMoles(11, 0.5, P.W / 2, P.H * 0.85); sim.addMoles(17, 0.3, P.W / 2, P.H * 0.3); } },
-    water: { text: 'Liquid water held together by hydrogen bonds. Turn the plate up past 373 K to boil it.', run: function () {
-      setPlate(293); sim.addMolecules(TEMPLATES.H2O, 900, P.W / 2, P.H - 200, { x: P.W / 2 - 30, y: 190 }); } },
+    water: { text: 'A blob of liquid water dropped from mid-air: it falls, splashes into a pool and wets the glass. Heat the plate past 373 K to boil it.', run: function () {
+      setPlate(293); sim.addMolecules(TEMPLATES.H2O, 1400, P.W / 2, P.H * 0.3, { x: 330, y: 260 }); } },
+    steam: { text: 'Water on a 450 K plate boils; the vapour condenses on the room-temperature glass and runs down the walls.', run: function () {
+      setPlate(450); sim.addMolecules(TEMPLATES.H2O, 1200, P.W / 2, P.H - 170, { x: P.W / 2 - 30, y: 160 }); } },
     methane: { text: 'CH₄ + 2 O₂. Spark it to burn methane into CO₂ and H₂O.', run: function () {
       setPlate(293); sim.addMolecules(TEMPLATES.CH4, 250, P.W / 2, P.H / 2, { x: P.W / 2 - 60, y: P.H / 2 - 60 });
       sim.addMoles(8, 0.5, P.W / 2, P.H / 2); } },
@@ -269,8 +285,9 @@
   }
 
   function updateModeUI() {
-    const atomView = renderer.isAtomView();
-    $('mode-badge').textContent = atomView ? 'Atom view · click to drop atoms' : 'Bulk view · click to add moles';
+    const atomView = renderer.isAtomView(), tier = renderer.tier();
+    $('mode-badge').textContent = tier === 'atoms' ? 'Click to drop atoms' : tier === 'moles' ? 'Each dot is 1 mmol · click to add moles' : 'As it looks to the eye · click to add moles';
+    document.querySelectorAll('#tiers button').forEach(function (b) { b.classList.toggle('active', b.dataset.tier === tier); });
     $('add-atoms').classList.toggle('active', atomView);
     $('add-moles').classList.toggle('active', !atomView);
     $('ro-temp').textContent = Math.round(sim.temperature) + ' K';
@@ -316,7 +333,7 @@
     }
     if (!state.paused && sim.n > 0) {
       // adaptive sub-stepping: spend ~9 ms per frame on physics (scaled by the speed setting)
-      const budget = 9 * state.speed;
+      const budget = 12 * state.speed;
       const subs = Math.max(1, Math.min(16, Math.floor(budget / Math.max(0.05, state.msPerSub))));
       const t0 = performance.now();
       sim.step(subs);
