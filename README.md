@@ -169,6 +169,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   isomers with the same formula and radioactive decay are not modelled.
 - Superheavy elements have estimated electronegativities (from the element above them) and
   predicted or unknown melting and boiling points.
+- Metal cohesion is calibrated on the melting point, so metals boil in the right order but
+  low-melting metals boil too early (gallium well below its real 2477 K), and a molten metal
+  shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 
