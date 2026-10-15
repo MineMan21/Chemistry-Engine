@@ -86,12 +86,13 @@
     drop: 'Drop: click in the jar to add the selected element or molecule.',
     spark: 'Spark: click to set off a spark. It heats a small spot to 4000 K and splits some bonds, which ignites fuels such as H₂ + O₂ or CH₄ + O₂.',
     cool: 'Chill: click to blast a small spot down to 80 K, to freeze or condense what is there.',
-    inspect: 'Inspect: click a molecule to pin its details. Then press Save this molecule to keep it in My molecules.'
+    inspect: 'Inspect: click a molecule to pin its details. Then press Save this molecule to keep it in My molecules.',
+    grab: 'Grab: press on material and drag to pull it around. A solid lifts as one lump, a liquid stretches and drips, a gas slips away.'
   };
   function setTool(t) {
     state.tool = t;
     document.querySelectorAll('#tools button').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
-    canvas.style.cursor = t === 'inspect' ? 'help' : 'crosshair';
+    canvas.style.cursor = t === 'inspect' ? 'help' : t === 'grab' ? 'grab' : 'crosshair';
     $('tool-hint').textContent = TOOL_HINTS[t];
   }
   document.querySelectorAll('#tools button').forEach(function (b) {
@@ -329,13 +330,27 @@
   canvas.addEventListener('pointerdown', function (e) {
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
-    if (pointers.size === 2) { drag = { pinch: pinchInfo() }; return; }
+    if (pointers.size === 2) { sim.grabEnd(); drag = { pinch: pinchInfo() }; return; }
+    if (state.tool === 'grab' && e.button === 0) {
+      // grab what is under the cursor (about 50 screen pixels, at least a few dozen atoms)
+      const w = renderer.screenToWorld(e.offsetX, e.offsetY);
+      if (sim.grabStart(w[0], w[1], Math.min(600, Math.max(120, 50 / renderer.cam.scale)))) {
+        drag = { grab: true };
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
+    }
     drag = { x: e.offsetX, y: e.offsetY, camX: renderer.cam.x, camY: renderer.cam.y, moved: false, button: e.button };
   });
   canvas.addEventListener('pointermove', function (e) {
     state.mouse = { x: e.offsetX, y: e.offsetY };
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
     if (!drag) return;
+    if (drag.grab) {
+      const w = renderer.screenToWorld(e.offsetX, e.offsetY);
+      sim.grabMove(w[0], w[1]);
+      return;
+    }
     if (drag.pinch && pointers.size === 2) {
       const now = pinchInfo();
       renderer.zoomAt(now.cx, now.cy, now.d / drag.pinch.d);
@@ -355,6 +370,7 @@
   function endPointer(e) {
     pointers.delete(e.pointerId);
     if (!drag) return;
+    if (drag.grab) { sim.grabEnd(); drag = null; canvas.style.cursor = 'grab'; return; }
     if (drag.pinch) { if (pointers.size === 0) drag = null; return; }
     if (!drag.moved && drag.button === 0 && e.type === 'pointerup') click(e.offsetX, e.offsetY);
     drag = null;

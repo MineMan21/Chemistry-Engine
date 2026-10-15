@@ -66,6 +66,8 @@
     METAL_RHO_A: 1,
     METAL_RHO_B: 3.5,
     METAL_RC_FACTOR: 1.45, // reach of metal-metal attraction, in contact distances
+    GRAB_OMEGA: 25, // grab tool: stiffness of the pull toward the hand (1/s)...
+    GRAB_MAX_ACCEL: 8000, // ...and its strongest pull (units/s^2, ~12x the settling force)
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
@@ -222,6 +224,7 @@
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
     this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
+    this.grab = null; // the grab tool's hold (see grabStart)
     this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
     this.fsP = new Float64Array(M); // minus the derivative of its embedding energy
     this.fsI = new Int32Array(8 * M); this.fsJ = new Int32Array(8 * M);
@@ -496,6 +499,7 @@
   S.clear = function () {
     this.n = 0;
     this.grains = [];
+    this.grab = null;
     this.tCell.fill(this.plateTemp);
     this.cellDebt.fill(0);
     this.present.fill(0);
@@ -506,6 +510,7 @@
   S.removeParticle = function (i) {
     const MB = P.MAXB;
     if (this.grainOf[i] >= 0) this.crystalEject(i);
+    if (this.grab) this.grabRenumber(i, this.n - 1);
     this._removing = true;
     while (this.nb[i] > 0) {
       const j = this.bp[i * MB];
@@ -2381,6 +2386,7 @@
       this.buildGrid();
       this.computeForces();
       this.angleForces();
+      if (this.grab) this.grabForces();
       this.integrate();
       this.solveBonds(P.SHAKE_ITERS);
       this.rampBonds();
@@ -2401,6 +2407,68 @@
       this.reactionWindowTime += P.DT;
     }
     this.updateGauges(substeps * P.DT);
+  };
+
+  // ---------------------------------------------------------------------------------------
+  // Grab: the user picks up the material under the cursor and drags it. The grabbed atoms share
+  // one uniform pull (a critically damped spring from their centre of mass to the hand, capped),
+  // so their own thermal motion is left alone and nothing is heated or frozen by holding it;
+  // everything else follows only through its own cohesion, so a solid lifts as a lump, a liquid
+  // stretches and drips, and a gas slips away.
+  // ---------------------------------------------------------------------------------------
+  S.grabStart = function (x, y, r) {
+    this.buildGrid();
+    const atoms = [];
+    const self = this;
+    this.query(x, y, r, function (j) {
+      const dx = self.x[j] - x, dy = self.y[j] - y;
+      if (dx * dx + dy * dy < r * r) atoms.push(j);
+    });
+    if (!atoms.length) { this.grab = null; return 0; }
+    let cx = 0, cy = 0;
+    for (const j of atoms) { cx += this.x[j]; cy += this.y[j]; }
+    cx /= atoms.length; cy /= atoms.length;
+    // the hand holds the patch where it was taken: target = hand + (centre - hand at the start)
+    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time };
+    return atoms.length;
+  };
+  S.grabMove = function (x, y) {
+    const g = this.grab;
+    if (!g) return;
+    const dtw = Math.max(1e-3, this.time - g.t);
+    // the hand's own velocity (smoothed), so the spring damps motion relative to the hand
+    g.vhx += 0.5 * ((x - g.hx) / dtw - g.vhx); g.vhy += 0.5 * ((y - g.hy) / dtw - g.vhy);
+    g.hx = x; g.hy = y; g.t = this.time;
+  };
+  S.grabEnd = function () { this.grab = null; };
+  S.grabForces = function () {
+    const g = this.grab, A = g.atoms, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
+    if (this.time - g.t > 0.05) { g.vhx *= 0.9; g.vhy *= 0.9; } // the hand has stopped
+    let M = 0, cx = 0, cy = 0, vx = 0, vy = 0;
+    for (let k = 0; k < A.length; k++) {
+      const i = A[k], m = mass[el[i]];
+      M += m; cx += m * x[i]; cy += m * y[i]; vx += m * (x[i] - px[i]); vy += m * (y[i] - py[i]);
+    }
+    if (!M) return;
+    cx /= M; cy /= M; vx /= M * P.DT; vy /= M * P.DT;
+    const w = P.GRAB_OMEGA;
+    let ax = w * w * (g.hx + g.ox - cx) - 2 * w * (vx - g.vhx);
+    let ay = w * w * (g.hy + g.oy - cy) - 2 * w * (vy - g.vhy);
+    const a = Math.hypot(ax, ay);
+    if (a > P.GRAB_MAX_ACCEL) { ax *= P.GRAB_MAX_ACCEL / a; ay *= P.GRAB_MAX_ACCEL / a; }
+    for (let k = 0; k < A.length; k++) {
+      const i = A[k], m = mass[el[i]];
+      this.fx[i] += m * ax; this.fy[i] += m * ay;
+    }
+  };
+  // particle `from` moved into slot `to` (to is being removed and from is the last one)
+  S.grabRenumber = function (to, from) {
+    const A = this.grab.atoms;
+    const k = A.indexOf(to);
+    if (k >= 0) { A[k] = A[A.length - 1]; A.pop(); }
+    const m = A.indexOf(from);
+    if (m >= 0) A[m] = to;
+    if (!A.length) this.grab = null;
   };
 
   S.updateGauges = function (elapsed) {
