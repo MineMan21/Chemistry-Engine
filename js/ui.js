@@ -130,7 +130,45 @@
     if (info.geometry && info.geometry.angle !== 180) {
       box.appendChild(el('div', 'sub', 'Drawn flattened to 2D; the angle above is the real 3D VSEPR value.'));
     }
-    if (pinned) box.appendChild(el('div', 'pinned', 'Pinned · click empty space to release'));
+    if (pinned) box.appendChild(el('div', 'pinned', 'Pinned · press Save this molecule (or S) to keep it · click empty space to release'));
+  };
+
+  // Info card for a molecule picked from the Molecules section.
+  UI.renderMoleculeInfo = function (container, m) {
+    container.innerHTML = '';
+    const big = el('div', 'big mol', m.formula);
+    container.appendChild(big);
+    container.appendChild(el('div', 'name', m.name));
+    const counts = {};
+    m.atoms.forEach(function (a) { counts[a[0]] = (counts[a[0]] || 0) + 1; });
+    const parts = Object.keys(counts).map(function (z) { return counts[z] + ' ' + E[z].name.toLowerCase(); });
+    container.appendChild(el('div', 'facts', m.atoms.length + ' atoms: ' + parts.join(', ')));
+    container.appendChild(el('div', 'facts', (m.saved ? 'Saved from your jar' : 'Preset') + ' · adds as ' + (m.gas ? 'a gas' : 'a liquid or solid')));
+  };
+
+  // Chips for preset and saved molecules.
+  UI.renderMoleculeChips = function (container, list, selectedId, onPick, onDelete) {
+    container.innerHTML = '';
+    if (!list.length) {
+      container.appendChild(el('span', 'empty', 'None saved yet.'));
+      return;
+    }
+    list.forEach(function (m) {
+      const b = el('button');
+      b.title = m.name;
+      b.appendChild(el('span', null, m.formula));
+      if (m.id === selectedId) b.classList.add('selected');
+      b.addEventListener('click', function () { onPick(m); });
+      if (onDelete) {
+        const x = el('span', 'del', '×');
+        x.setAttribute('role', 'button');
+        x.setAttribute('aria-label', 'Delete ' + m.name);
+        x.title = 'Delete';
+        x.addEventListener('click', function (e) { e.stopPropagation(); onDelete(m); });
+        b.appendChild(x);
+      }
+      container.appendChild(b);
+    });
   };
 
   CE.UI = UI;

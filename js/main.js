@@ -12,6 +12,7 @@
 
   const state = {
     element: 1,
+    mol: null, // selected molecule template (null = add the selected element)
     tool: 'drop',
     perClick: 1,
     paused: false,
@@ -29,15 +30,66 @@
   function selectElement(z) {
     if (cells[state.element]) cells[state.element].classList.remove('selected');
     state.element = z;
+    state.mol = null;
     cells[z].classList.add('selected');
     CE.UI.renderElementInfo($('el-info'), z, state.natural);
+    renderMoleculeLists();
     setTool('drop');
   }
 
+  // ------------------------------------------------------------------ molecules
+  let saved = CE.molecules.loadSaved();
+  function selectMolecule(m) {
+    if (cells[state.element]) cells[state.element].classList.remove('selected');
+    state.mol = m;
+    CE.UI.renderMoleculeInfo($('el-info'), m);
+    renderMoleculeLists();
+    setTool('drop');
+  }
+  function renderMoleculeLists() {
+    const sel = state.mol ? state.mol.id : null;
+    CE.UI.renderMoleculeChips($('mol-presets'), CE.molecules.PRESETS, sel, selectMolecule, null);
+    CE.UI.renderMoleculeChips($('mol-saved'), saved, sel, selectMolecule, function (m) {
+      saved = saved.filter(function (o) { return o.id !== m.id; });
+      CE.molecules.storeSaved(saved);
+      if (state.mol && state.mol.id === m.id) selectElement(state.element);
+      renderMoleculeLists();
+      toast('Deleted ' + m.name + ' from My molecules.');
+    });
+  }
+  function savePinned() {
+    const i = state.pinned;
+    if (i < 0 || i >= sim.n) { toast('Pick Inspect and click a molecule in the jar first.'); return; }
+    const tpl = sim.captureMolecule(i, 150);
+    if (!tpl) { toast('That cluster is too big to save (150 atoms at most). Try a single molecule.'); return; }
+    const info = sim.inspect(i);
+    const sp = sim.species && sim.spIdx ? sim.species[sim.spIdx[i]] : null;
+    const existing = saved.find(function (m) { return m.formula === info.formula && m.atoms.length === tpl.atoms.length; });
+    if (existing) { selectMolecule(existing); toast(existing.name + ' is already in My molecules, so it is selected now.'); return; }
+    const m = {
+      id: 'saved-' + Date.now(), saved: true,
+      name: info.name || info.formula, formula: info.formula,
+      gas: !!(sp && sp.phase === 'gas' && tpl.atoms.length <= 12),
+      atoms: tpl.atoms, bonds: tpl.bonds
+    };
+    saved.push(m);
+    const ok = CE.molecules.storeSaved(saved);
+    selectMolecule(m);
+    toast('Saved ' + m.name + ' to My molecules' + (ok ? '' : ' for this visit (this browser blocks storage)') + '. Click in the jar to add it.');
+  }
+  $('save-pinned').addEventListener('click', savePinned);
+
+  const TOOL_HINTS = {
+    drop: 'Drop: click in the jar to add the selected element or molecule.',
+    spark: 'Spark: click to set off a spark. It heats a small spot to 4000 K and splits some bonds, which ignites fuels such as H₂ + O₂ or CH₄ + O₂.',
+    cool: 'Chill: click to blast a small spot down to 80 K, to freeze or condense what is there.',
+    inspect: 'Inspect: click a molecule to pin its details. Then press Save this molecule to keep it in My molecules.'
+  };
   function setTool(t) {
     state.tool = t;
     document.querySelectorAll('#tools button').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
     canvas.style.cursor = t === 'inspect' ? 'help' : 'crosshair';
+    $('tool-hint').textContent = TOOL_HINTS[t];
   }
   document.querySelectorAll('#tools button').forEach(function (b) {
     b.addEventListener('click', function () { setTool(b.dataset.tool); });
@@ -169,7 +221,28 @@
   // ------------------------------------------------------------------ adding
   function insideJar(x, y) { return x > 0 && x < P.W && y > 0 && y < P.H; }
 
+  // Adds `count` copies of the selected molecule around (x, y): packed like a liquid/solid, or
+  // spread out for gases.
+  function addMoleculesAt(x, y, count) {
+    const m = state.mol;
+    let size = 0;
+    m.atoms.forEach(function (a) { size = Math.max(size, Math.hypot(a[1], a[2]) + E[a[0]].radius * 0.5); });
+    const room = Math.floor((P.MAX - sim.n) / m.atoms.length);
+    const n = Math.min(count, room);
+    if (n <= 0) { toast('The jar is full (' + P.MAX + ' particles). Empty it or use the vacuum pump.'); return; }
+    const spacing = m.gas ? 3 : 1;
+    const a0 = size * 2.05 * spacing;
+    let half = Math.sqrt(n / 0.87) * a0 / 2 + a0;
+    // a square patch, stretched downward/upward when wider than the jar
+    const hx = Math.min(P.W / 2 - 10, half), hy = Math.min(P.H / 2 - 10, half * half / hx);
+    const cx = Math.min(P.W - hx - 5, Math.max(hx + 5, x)), cy = Math.min(P.H - hy - 5, Math.max(hy + 5, y));
+    const before = sim.n;
+    const placed = sim.addMolecules(m, n, cx, cy, { x: hx, y: hy }, P.AMBIENT, spacing);
+    afterAdd(before, placed, count);
+  }
+
   function addAtomsAt(x, y) {
+    if (state.mol) { addMoleculesAt(x, y, state.perClick); return; }
     const z = state.element;
     const before = sim.n;
     const res = sim.addSubstance(z, state.perClick, x, y, { natural: state.natural, spacing: E[z].radius * (state.natural && CE.DIATOMIC.has(z) ? 3.4 : 2.3) });
@@ -178,6 +251,7 @@
 
   function addMolesAt(x, y) {
     const mol = Math.max(0.001, Math.min(60, +$('mol-amount').value || 1));
+    if (state.mol) { addMoleculesAt(x, y, Math.max(1, Math.round(mol / P.MOL_PER_PARTICLE))); return; }
     const z = state.element;
     const before = sim.n;
     const units = Math.max(1, Math.round(mol / P.MOL_PER_PARTICLE));
@@ -275,6 +349,7 @@
     else if (e.key === '+' || e.key === '=') renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1.4);
     else if (e.key === '-' || e.key === '_') renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1 / 1.4);
     else if (e.key === 'f' || e.key === 'F') renderer.fit();
+    else if ((e.key === 's' || e.key === 'S') && state.pinned >= 0) savePinned();
   });
 
   // ------------------------------------------------------------------ panels
@@ -305,6 +380,7 @@
       const w = renderer.screenToWorld(state.mouse.x, state.mouse.y);
       if (insideJar(w[0], w[1])) i = sim.nearest(w[0], w[1], Math.max(25, 8 / renderer.cam.scale));
     }
+    $('save-pinned').hidden = !pinned;
     if (i < 0) { box.hidden = true; renderer.highlight = null; return; }
     const info = sim.inspect(i);
     if (!info) { box.hidden = true; renderer.highlight = null; return; }
