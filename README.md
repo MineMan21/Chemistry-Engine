@@ -46,6 +46,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
+| Grab | Grab tool, then press on material and drag: the patch under the cursor is pulled toward your hand and everything else follows only by its own cohesion, so you can feel how well things stick together. A solid lump lifts in one piece, a liquid stretches, necks and drips, a gas slips away. The pull is capped, so a small grip on a big solid can tear a piece off |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |

@@ -114,7 +114,7 @@
     else {
       const mix = this.realMix();
       if (mix < 1) this.drawPixels(ctx, 1 - mix);
-      if (mix > 0) this.drawReal(ctx, mix);
+      if (mix > 0) this.drawReal(ctx, mix, dt);
       if (mix > 0 && this.focus) this.drawFocusDots(ctx, mix);
     }
 
@@ -124,6 +124,7 @@
     ctx.translate(-this.cam.x, -this.cam.y);
     this.drawApparatusFront(ctx);
     this.drawSparks(ctx, dt);
+    this.drawGrab(ctx);
     ctx.restore();
     this.drawScaleBar(ctx);
   };
@@ -312,15 +313,19 @@
 
   // Real-world view: atoms are splatted onto a coarse grid, blurred into continuous material and
   // shaded by what the substance looks like (translucent liquid with a bright surface, opaque
-  // solid, tinted gas). The simulation underneath is unchanged.
-  R.drawReal = function (ctx, alpha) {
+  // solid, tinted gas). The simulation underneath is unchanged. Everything that decides how an
+  // atom is drawn varies smoothly (splatting, condensed and solid weights) and the grid is eased
+  // over a fraction of a second, so the material does not flicker as hot atoms jostle.
+  R.drawReal = function (ctx, alpha, dt) {
     const sim = this.sim, n = sim.n, W = P.W, H = P.H;
     const cw = Math.max(6, 2.6 / this.cam.scale); // grid cell in world units (~2.6 screen px)
     const gw = Math.ceil(W / cw), gh = Math.ceil(H / cw), N = gw * gh;
     if (!this._rg || this._rg.N !== N) {
       const ch = [];
       for (let k = 0; k < 11; k++) ch.push(new Float32Array(N));
-      this._rg = { N: N, ch: ch, tmp: new Float32Array(N) };
+      const prev = [];
+      for (let k = 0; k < 10; k++) prev.push(new Float32Array(N));
+      this._rg = { N: N, ch: ch, prev: prev, fresh: true, tmp: new Float32Array(N) };
       this.realCanvas = document.createElement('canvas');
       this.realCanvas.width = gw; this.realCanvas.height = gh;
       this.realCtx = this.realCanvas.getContext('2d');
@@ -332,30 +337,57 @@
     const [dens, cr, cg, cb, cop, csol, ga, gr, gg, gb] = ch;
     const species = sim.species || [], spIdx = sim.spIdx, x = sim.x, y = sim.y, el = sim.el;
     const area = 1 / (cw * cw);
+    const condF = sim.condF;
     for (let i = 0; i < n; i++) {
       const sp = spIdx ? species[spIdx[i]] : null;
       const look = sp && sp.look;
       if (!look) continue;
-      let gx = Math.floor(x[i] / cw), gy = Math.floor(y[i] / cw);
-      if (gx < 0) gx = 0; else if (gx >= gw) gx = gw - 1;
-      if (gy < 0) gy = 0; else if (gy >= gh) gy = gh - 1;
+      // bilinear splat over the four nearest cells, so an atom moving across a cell boundary
+      // fades across instead of jumping
+      let fx = x[i] / cw - 0.5, fy = y[i] / cw - 0.5;
+      fx = fx < 0 ? 0 : fx > gw - 1.001 ? gw - 1.001 : fx;
+      fy = fy < 0 ? 0 : fy > gh - 1.001 ? gh - 1.001 : fy;
+      const gx = Math.floor(fx), gy = Math.floor(fy), tx = fx - gx, ty = fy - gy;
       const c = gy * gw + gx;
       const r = E[el[i]].radius;
       const w = Math.PI * r * r * area;
-      // drawn as liquid/solid only when genuinely packed (several neighbours, persistently), so a
-      // few gas molecules that happen to touch stay invisible vapour
-      if ((sim.condF[i] > 0.6 && sim.contacts[i] >= 2) || (sim.nb[i] >= 2 && sim.contacts[i] >= 1) || sim.condF[i] > 0.9) {
-        dens[c] += w;
-        cr[c] += look.rgb[0] * w; cg[c] += look.rgb[1] * w; cb[c] += look.rgb[2] * w;
-        cop[c] += look.opacity * w; csol[c] += (look.solid ? 1 : 0) * w;
-      } else if (look.gas > 0) {
-        const s = look.gas * w;
-        ga[c] += s; gr[c] += look.rgb[0] * s; gg[c] += look.rgb[1] * s; gb[c] += look.rgb[2] * s;
+      // how much of the atom is drawn as liquid/solid: a smooth ramp in its time-smoothed
+      // 'packed' flag (an instantaneous contact count would flicker), so a few gas molecules
+      // that happen to touch stay invisible vapour
+      const wc = smooth(0.35, 0.75, condF[i]);
+      // solid or liquid: crystal-forming substances (water, metals) by the atom's own state, so
+      // a melt near its melting point does not flip between looks with the average temperature
+      const sol = sim.crystalKind(i) || (sim.nb[i] === 1 && sim.isWaterO(sim.bp[i * P.MAXB]))
+        ? (sim.isSolidAtom(i) ? 1 : 0) : (look.solid ? 1 : 0);
+      const wm = w * wc, wg = w * (1 - wc) * look.gas;
+      for (let k = 0; k < 4; k++) {
+        const b = k & 1 ? tx : 1 - tx, a = k & 2 ? ty : 1 - ty, f = a * b;
+        if (f <= 0) continue;
+        const cc = c + (k & 1) + (k & 2 ? gw : 0);
+        if (wm > 0) {
+          const m = wm * f;
+          dens[cc] += m;
+          cr[cc] += look.rgb[0] * m; cg[cc] += look.rgb[1] * m; cb[cc] += look.rgb[2] * m;
+          cop[cc] += look.opacity * m; csol[cc] += sol * m;
+        }
+        if (wg > 0) {
+          const g = wg * f;
+          ga[cc] += g; gr[cc] += look.rgb[0] * g; gg[cc] += look.rgb[1] * g; gb[cc] += look.rgb[2] * g;
+        }
       }
     }
-    const R0 = Math.max(1, Math.round(20 / cw)), RG = Math.max(3, Math.round(160 / cw));
+    // blur about one atom diameter, so packed atoms (metals sit ~36 units apart) read as one piece
+    const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(3, Math.round(160 / cw));
     for (let k = 0; k <= 5; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
     for (let k = 6; k <= 9; k++) { boxBlur(ch[k], gw, gh, RG, this._rg.tmp); boxBlur(ch[k], gw, gh, RG, this._rg.tmp); }
+    // ease toward this frame's picture (time constant ~0.12 s)
+    const prev = this._rg.prev;
+    const ease = this._rg.fresh ? 1 : 1 - Math.exp(-(dt || 0.016) / 0.12);
+    this._rg.fresh = false;
+    for (let k = 0; k < 10; k++) {
+      const a = ch[k], b = prev[k];
+      for (let c = 0; c < N; c++) { b[c] += ease * (a[c] - b[c]); a[c] = b[c]; }
+    }
     const img = this.realImg.data;
     for (let gy = 0; gy < gh; gy++) {
       for (let gx = 0; gx < gw; gx++) {
@@ -371,12 +403,13 @@
         const cov = smooth(0.3, 0.55, d);
         if (cov > 0) {
           let r = cr[c] / d, g = cg[c] / d, b = cb[c] / d;
-          const solid = csol[c] / d > 0.5;
-          let a = solid ? cov : cov * Math.min(1, cop[c] / d);
+          // solid fraction blends the looks (opaque, matte) and (translucent, glossy) smoothly
+          const sf = smooth(0.2, 0.8, csol[c] / d);
+          let a = cov * (sf + (1 - sf) * Math.min(1, cop[c] / d));
           // light from above: brighten upward-facing surfaces, darken undersides
           const up = gy > 0 ? dens[c - gw] : 0, down = gy < gh - 1 ? dens[c + gw] : d;
           const edge = smooth(0.15, 0.5, d - up) - 0.6 * smooth(0.15, 0.5, d - down);
-          const lift = solid ? 0.2 * edge : 0.7 * edge;
+          const lift = (0.7 - 0.5 * sf) * edge;
           if (lift > 0) { r += (255 - r) * lift; g += (255 - g) * lift; b += (255 - b) * lift; a = Math.min(1, a + 0.45 * lift); }
           else { r *= 1 + lift * 0.35; g *= 1 + lift * 0.35; b *= 1 + lift * 0.35; }
           // composite the material over the gas
@@ -407,6 +440,28 @@
     glare.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = glare;
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  };
+
+  // The grab tool's hand: a ring at the cursor and a line to the centre of what it holds, which
+  // stretches when the material resists
+  R.drawGrab = function (ctx) {
+    const g = this.sim.grab;
+    if (!g) return;
+    const sim = this.sim, A = g.atoms;
+    let cx = 0, cy = 0;
+    for (let k = 0; k < A.length; k++) { cx += sim.x[A[k]]; cy += sim.y[A[k]]; }
+    cx /= A.length; cy /= A.length;
+    const hx = g.hx + g.ox, hy = g.hy + g.oy, px = 1 / this.cam.scale;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 200, 60, 0.9)';
+    ctx.lineWidth = 2 * px;
+    ctx.setLineDash([6 * px, 4 * px]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(hx, hy, 9 * px, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 200, 60, 0.9)';
+    ctx.beginPath(); ctx.arc(cx, cy, 3.5 * px, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   };
 
