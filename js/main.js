@@ -34,6 +34,7 @@
     state.mol = null;
     cells[z].classList.add('selected');
     CE.UI.renderElementInfo($('el-info'), z, state.natural);
+    addPhaseButton($('el-info'), { element: z });
     renderMoleculeLists();
     setTool('drop');
   }
@@ -44,6 +45,7 @@
     if (cells[state.element]) cells[state.element].classList.remove('selected');
     state.mol = m;
     CE.UI.renderMoleculeInfo($('el-info'), m);
+    addPhaseButton($('el-info'), { key: moleculeKey(m.atoms), formula: m.formula, name: m.name });
     renderMoleculeLists();
     setTool('drop');
   }
@@ -104,6 +106,7 @@
   $('natural').addEventListener('change', function (e) {
     state.natural = e.target.checked;
     CE.UI.renderElementInfo($('el-info'), state.element, state.natural);
+    addPhaseButton($('el-info'), { element: state.element });
   });
   $('add-btn').addEventListener('click', function () {
     addMolesAt(P.W / 2, P.H * 0.25);
@@ -356,6 +359,7 @@
 
   window.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (!$('phase-dialog').hidden) { if (e.key === 'Escape') closePhase(); return; }
     if (e.key === ' ') { setPaused(!state.paused); e.preventDefault(); }
     else if (e.key === '+' || e.key === '=') renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1.4);
     else if (e.key === '-' || e.key === '_') renderer.zoomAt(renderer.width / 2, renderer.height / 2, 1 / 1.4);
@@ -373,7 +377,82 @@
       refreshContents();
       if (state.focusKey) toast('Highlighting every ' + sp.formula + (sp.name ? ' (' + sp.name + ')' : '') + ' in the jar. Click it again to clear.');
     }, state.focusKey);
+    const fb = $('phase-focus'), sp = state.focusKey && sim.species.find(function (x) { return x.key === state.focusKey; });
+    fb.hidden = !sp;
+    if (sp) {
+      fb.textContent = 'Phase diagram of ' + sp.formula;
+      fb.onclick = function () { openPhase({ key: sp.key, formula: sp.formula, name: sp.name }); };
+    }
   }
+
+  // ------------------------------------------------------------------ phase diagrams
+  const phaseUI = { chart: null, key: null, returnFocus: null };
+  function moleculeKey(atoms) {
+    const counts = {};
+    atoms.forEach(function (a) { counts[a[0]] = (counts[a[0]] || 0) + 1; });
+    return CE.chem.describe(counts, atoms.length, false).key;
+  }
+  function addPhaseButton(container, what) {
+    const b = document.createElement('button');
+    b.className = 'btn phase-btn';
+    b.textContent = 'Phase diagram';
+    b.addEventListener('click', function () { openPhase(what); });
+    container.appendChild(b);
+  }
+  // what: { element: z } or { key, formula, name }
+  function openPhase(what) {
+    let d, title, missing;
+    if (what.element) {
+      const e = CE.elements[what.element];
+      d = CE.phase.forElement(what.element);
+      const form = CE.DIATOMIC.has(what.element) ? CE.chem.pretty(e.symbol + '2') : e.symbol;
+      title = e.name + ' (' + form + ')';
+      missing = 'melts at ' + (e.mp ? Math.round(e.mp) + ' K' : 'an unknown temperature') + ' and boils at ' + (e.bp ? Math.round(e.bp) + ' K' : 'an unknown temperature') + ' at 1 atm';
+    } else {
+      d = CE.phase.forKey(what.key);
+      title = (d ? d.name : what.name || what.formula) + ' (' + what.formula + ')';
+    }
+    const body = $('phase-body');
+    body.innerHTML = '';
+    $('phase-title').textContent = 'Phase diagram: ' + title;
+    phaseUI.chart = null;
+    phaseUI.key = d ? d.key : null;
+    if (!d) {
+      $('phase-sub').textContent = 'No documented phase diagram';
+      const p = document.createElement('p');
+      p.className = 'phase-note';
+      p.textContent = 'Its triple and critical points are not well documented, so no diagram is drawn' +
+        (missing ? '. What is known: it ' + missing + '.' : '.');
+      body.appendChild(p);
+    } else {
+      $('phase-sub').textContent = 'Which phase it is in at each temperature and pressure. Hover the chart to read values; the ring marks the jar right now.';
+      phaseUI.chart = CE.PhaseChart.render(body, d);
+      body.appendChild(CE.PhaseChart.table(d));
+      const note = document.createElement('p');
+      note.className = 'phase-note';
+      note.textContent = (d.note ? d.note + ' ' : '') + 'Reference data: NIST Chemistry WebBook and CRC Handbook. Lines between the documented points follow the Clausius–Clapeyron relation' +
+        (d.est.length ? '; values marked (est.) are estimates.' : '.');
+      body.appendChild(note);
+      updatePhaseMarker();
+    }
+    const dlg = $('phase-dialog');
+    if (dlg.hidden) phaseUI.returnFocus = document.activeElement;
+    dlg.hidden = false;
+    $('phase-close').focus();
+  }
+  function closePhase() {
+    $('phase-dialog').hidden = true;
+    phaseUI.chart = null;
+    if (phaseUI.returnFocus && phaseUI.returnFocus.focus) phaseUI.returnFocus.focus();
+  }
+  // the jar's pressure, and the substance's own temperature when it is in the jar
+  function updatePhaseMarker() {
+    if (!phaseUI.chart) return;
+    const sp = sim.species && sim.species.find(function (x) { return x.key === phaseUI.key; });
+    phaseUI.chart.setJar(sp ? sp.T : sim.temperature, sim.n ? sim.pressureAtm : 0);
+  }
+  $('phase-close').addEventListener('click', closePhase);
+  $('phase-dialog').addEventListener('click', function (e) { if (e.target === e.currentTarget) closePhase(); });
 
   // Per-atom mask of the highlighted species, from the species index of the last analysis.
   function updateFocus() {
@@ -447,7 +526,7 @@
     state.frame++;
     if (state.frame % 10 === 0) {
       sim.analyze();
-      if (state.frame % 30 === 0) refreshContents();
+      if (state.frame % 30 === 0) { refreshContents(); updatePhaseMarker(); }
     }
     updateFocus();
     renderer.draw(dt);

@@ -171,6 +171,56 @@ test('the vacuum pump removes gas and the gas can adds it', function () {
   assert.ok(sim.n > before + 1000, 'gas can added ' + (sim.n - before));
 });
 
+test('phase data: documented points and phases', function () {
+  const ph = CE.phase, w = ph.forKey('H2O');
+  assert.strictEqual(ph.phaseAt(w, 293, 1), 'liquid');
+  assert.strictEqual(ph.phaseAt(w, 263, 1), 'solid');
+  assert.strictEqual(ph.phaseAt(w, 400, 1), 'gas');
+  assert.strictEqual(ph.phaseAt(w, 700, 300), 'supercritical');
+  assert.strictEqual(ph.phaseAt(w, 100, 1e-9), 'solid', 'ice at 100 K does not evaporate in a vacuum');
+  // the vapour curve passes through the normal boiling point; ice's vapour pressure at 250 K is ~7.6e-4 atm
+  assert.ok(Math.abs(ph.vaporP(w, 373.12) - 1) < 1e-6);
+  const p250 = ph.sublimationP(w, 250);
+  assert.ok(p250 > 5e-4 && p250 < 1.1e-3, 'ice vapour pressure at 250 K ' + p250);
+  // dry ice sublimes at 1 atm; liquid CO2 needs more than 5.1 atm
+  const c = ph.forKey('CO2');
+  assert.strictEqual(ph.phaseAt(c, 190, 1), 'solid');
+  assert.strictEqual(ph.phaseAt(c, 210, 1), 'gas');
+  assert.strictEqual(ph.phaseAt(c, 250, 30), 'liquid');
+  assert.ok(ph.forElement(Z('O')) === ph.forKey('O2') && ph.forElement(Z('Ar')) === ph.forKey('Ar'));
+  assert.strictEqual(ph.forElement(Z('Fe')), null);
+  Object.keys(ph.DATA).forEach(function (k) {
+    const d = ph.DATA[k], g = ph.diagram(d);
+    g.lines.forEach(function (l) { l.pts.forEach(function (p) { assert.ok(isFinite(p[0]) && isFinite(p[1]) && p[1] > 0, k + ' ' + l.kind); }); });
+  });
+});
+
+test('water freezes into an ordered lattice and is recognised as a solid', function () {
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const sim = newSim(12);
+  sim.react = function () {}; sim.bondEvents = function () {};
+  sim.addMolecules(H2O, 500, P.W / 2, P.H - 200, { x: 350, y: 150 });
+  sim.plateTemp = 200;
+  run(sim, 10);
+  const O = [];
+  for (let i = 0; i < sim.n; i++) if (sim.el[i] === 8) O.push(i);
+  let solid = 0, order = 0, counted = 0;
+  O.forEach(function (i) {
+    if (sim.isSolidAtom(i)) solid++;
+    // local hexagonal bond-orientational order of the oxygen lattice
+    let re = 0, im = 0, k = 0;
+    O.forEach(function (j) {
+      if (j === i) return;
+      const dx = sim.x[j] - sim.x[i], dy = sim.y[j] - sim.y[i];
+      if (dx * dx + dy * dy < 36 * 36) { const a = 6 * Math.atan2(dy, dx); re += Math.cos(a); im += Math.sin(a); k++; }
+    });
+    if (k >= 2) { order += Math.hypot(re, im) / k; counted++; }
+  });
+  assert.ok(sim.temperature < 260, 'cooled to ' + sim.temperature);
+  assert.ok(solid > 0.8 * O.length, 'ice counted as solid: ' + solid + ' of ' + O.length);
+  assert.ok(order / counted > 0.7, 'lattice order psi6 ' + (order / counted).toFixed(2));
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);
