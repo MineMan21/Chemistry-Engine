@@ -340,6 +340,39 @@ test('the grab tool lifts a solid iron lump in one piece from a small grip', fun
   assert.strictEqual(sim.grab, null);
 });
 
+test('a held solid keeps its shape when shoved into the glass', function () {
+  const sim = newSim(25);
+  const fe = Z('Fe');
+  sim.addMoles(fe, 0.3, P.W / 2, P.H - 150);
+  run(sim, 3);
+  const A = [];
+  for (let i = 0; i < sim.n; i++) A.push(i);
+  const pairs = [];
+  A.forEach(function (i) {
+    A.forEach(function (j) {
+      const d = Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]);
+      if (j > i && d < 2 * CE.elements[fe].radius * 1.2) pairs.push([i, j, d]);
+    });
+  });
+  let top = P.H, cx = 0;
+  A.forEach(function (i) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / A.length; });
+  sim.grabStart(cx, top + 30, 120);
+  const steps = Math.round(4 / P.DT);
+  for (let s = 0; s < steps; s += 6) {
+    const t = s / steps;
+    // lift, then drag the hand far past the left wall
+    sim.grabMove(t < 0.5 ? cx : cx - 3000 * (t - 0.5), top + 30 - 600 * Math.min(1, 2 * t));
+    sim.step(6);
+  }
+  let broken = 0;
+  pairs.forEach(function (p) { if (Math.hypot(sim.x[p[1]] - sim.x[p[0]], sim.y[p[1]] - sim.y[p[0]]) > 1.4 * p[2]) broken++; });
+  let left = P.W;
+  A.forEach(function (i) { left = Math.min(left, sim.x[i]); });
+  assert.ok(left < 60, 'the lump reached the wall (leftmost ' + left.toFixed(0) + ')');
+  assert.ok(broken < 0.02 * pairs.length, 'the lump is not crushed: ' + broken + ' of ' + pairs.length + ' contacts broken');
+  sim.grabEnd();
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

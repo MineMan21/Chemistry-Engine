@@ -23,6 +23,14 @@
     AMBIENT: 293,
     K_REP: 160000, // repulsion stiffness (per unit reduced mass)
     RC_FACTOR: 1.45, // attraction cutoff as a multiple of contact distance
+    ION_RC: 75, // Coulomb cutoff (units) between ions (atoms with an ionic bond), about 2.5 Na-Cl
+    // contacts: ionic lattices are held by the long reach of the full charges, which the short
+    // molecular cutoff would cancel (like charges sit just past the nearest opposite ones)
+    ION_KC: 3, // Coulomb between two ions, relative to KC (which is kept gentle for the small partial
+    // charges of molecules): enough that salts, oxides and other ionic compounds are solids
+    ION_CATION: 0.6, ION_ANION: 1.8, // ionic radii as multiples of the covalent radius: cations
+    // shrink and anions swell (Na+ 102 pm, Cl- 181 pm; Mg2+ 72, O2- 140), so ions in a lattice
+    // touch at the ionic bond length instead of at the neutral atoms' much larger contact
     KC: 2.0e8, // Coulomb constant (sim energy * units / e^2)
     PARTIAL_CHARGE: 0.3, // partial charge per unit electronegativity difference
     VDW_SCALE: 2.25, // calibration factor for van der Waals well depths (2D, short-ranged well)
@@ -74,6 +82,7 @@
     METAL_RHO_B: 3.5,
     METAL_RC_FACTOR: 1.45, // reach of metal-metal attraction, in contact distances
     GRAB_OMEGA: 25, // grab tool: stiffness of the pull toward the hand (1/s)...
+    GRAB_RIGID: 20000, // ...and how firmly a held solid keeps its shape (1/s^2)
     GRAB_MAX_ACCEL: 8000, // ...and its strongest pull (units/s^2, ~12x the settling force)
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
@@ -87,6 +96,7 @@
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
     LN_UNI: 16, // ln of the unimolecular attempt frequency (bond dissociation)
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
+    ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
     // attack triplet O=O (why O2 is slow with fuels and metals but fast with radicals)
@@ -142,7 +152,9 @@
   const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ);
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   const meltK = new Float32Array(NZ); // melting point (K)
-  const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ);
+  const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ), pairRcIon = new Float32Array(NZ * NZ);
+  const ionCap = new Uint8Array(NZ); // can form ionic bonds with some element
+  const catR = new Float32Array(NZ), anR = new Float32Array(NZ); // ionic contact radii (units)
   const pairEps = new Float32Array(NZ * NZ), pairMetalEps = new Float32Array(NZ * NZ);
   // (re)builds the per-element and pair tables from P; tests and tuning scripts call it again
   // after changing parameters
@@ -181,6 +193,12 @@
       pairMetalEps[p] = Math.sqrt(metalEps[a] * metalEps[b]) * P.KB;
     }
   }
+  for (let a = 1; a < NZ; a++) { catR[a] = E[a].covRadius / 10 * P.ION_CATION; anR[a] = E[a].covRadius / 10 * P.ION_ANION; }
+  for (let a = 1; a < NZ; a++) { ionCap[a] = 0; for (let b = 1; b < NZ; b++) if (C.pairClass[a * NZ + b] === 2) { ionCap[a] = 1; break; } }
+  for (let a = 1; a < NZ; a++) for (let b = 1; b < NZ; b++) {
+    const p = a * NZ + b;
+    pairRcIon[p] = ionCap[a] && ionCap[b] ? Math.max(pairRc[p], P.ION_RC) : 0;
+  }
   }
   buildTables();
 
@@ -218,6 +236,7 @@
     this.ghostT = new Uint8Array(M); // number of active ghost slots
     this.used = new Uint8Array(M); // total bond order (valence used)
     this.q = new Float32Array(M); // charge (ionic) / partial charge (covalent)
+    this.ion = new Uint8Array(M); // 1 for an ion (an atom with an ionic bond): long-range Coulomb
     this.tLoc = new Float32Array(M); // local temperature used for kinetics
     this.tSelf = new Float32Array(M); // each atom's own recent kinetic temperature (EMA)
     this.contacts = new Uint8Array(M); // non-bonded neighbours in contact
@@ -694,13 +713,14 @@
 
   S.updateCharge = function (i) {
     const MB = P.MAXB, base = i * MB, ei = this.el[i];
-    let q = 0;
+    let q = 0, ion = 0;
     for (let k = 0; k < this.nb[i]; k++) {
       const ej = this.el[this.bp[base + k]];
-      if (this.bc[base + k] === 2) q += (en[ei] < en[ej] ? 1 : -1) * this.bo[base + k];
+      if (this.bc[base + k] === 2) { q += (en[ei] < en[ej] ? 1 : -1) * this.bo[base + k]; ion = 1; }
       else q += P.PARTIAL_CHARGE * (en[ej] - en[ei]);
     }
     this.q[i] = Math.max(-3, Math.min(3, q));
+    this.ion[i] = ion;
     let donor = 0;
     if (ei === 1) for (let k = 0; k < this.nb[i]; k++) if (HB_ACCEPTOR[this.el[this.bp[base + k]]]) donor = 1;
     this.hbd[i] = donor;
@@ -763,6 +783,7 @@
       for (let b = a; b < NZ; b++) {
         if (!this.present[b]) continue;
         if (pairRc[a * NZ + b] > maxRc) maxRc = pairRc[a * NZ + b];
+        if (pairRcIon[a * NZ + b] > maxRc) maxRc = pairRcIon[a * NZ + b];
       }
     }
     this.cellSize = Math.ceil(maxRc);
@@ -822,7 +843,7 @@
   // ---------------------------------------------------------------------------------------
   S.computeForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, el = this.el;
-    const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used;
+    const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used, ion = this.ion;
     const bp = this.bp, MB = P.MAXB;
     const gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
     fx.fill(0, 0, n); fy.fill(0, 0, n);
@@ -841,7 +862,8 @@
       const d2 = dx * dx + dy * dy;
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
       const rc = pairRc[p];
-      if (d2 >= rc * rc) return;
+      const ionic = ion[i] && ion[j], rcq = ionic ? pairRcIon[p] : rc;
+      if (d2 >= rc * rc && (!ionic || d2 >= rcq * rcq)) return;
       if (nb[i] && nb[j]) {
         // excluded pairs: bonded (1-2) or sharing a bonded neighbour (1-3); inlined, it is hot
         const bi = i * MB, nbi = nb[i];
@@ -853,7 +875,14 @@
         }
       }
       const d = Math.sqrt(d2) || 1e-6;
-      let sigma = pairSigma[p];
+      if (d2 >= rc * rc) {
+        // two ions beyond the contact range: long-range Coulomb only
+        const F = P.KC * P.ION_KC * q[i] * q[j] * (1 / d2 - 1 / (rcq * rcq));
+        const fxp = F * dx / d, fyp = F * dy / d;
+        fx[i] -= fxp; fy[i] -= fyp; fx[j] += fxp; fy[j] += fyp;
+        return;
+      }
+      let sigma = ionic ? (q[i] > 0 ? catR[ei] : anR[ei]) + (q[j] > 0 ? catR[ej] : anR[ej]) : pairSigma[p];
       // hydrogen bond: donor H and acceptor N/O/F may approach closer and attract strongly
       const hbs = hbd[i] ? HB_ACCEPTOR[ej] : hbd[j] ? HB_ACCEPTOR[ei] : 0;
       if (hbs) sigma *= P.HB_CONTACT;
@@ -904,7 +933,7 @@
         // shifted-force Coulomb, U = KC q q (1/d - 1/rc + (d - rc)/rc^2): energy and force both
         // reach zero smoothly at the cutoff (an abrupt force cutoff slowly heats liquids)
         const dd = d < sigma * 0.8 ? sigma * 0.8 : d;
-        F += P.KC * qq * (1 / (dd * dd) - 1 / (rc * rc));
+        F += (ionic ? P.KC * P.ION_KC : P.KC) * qq * (1 / (dd * dd) - 1 / (rcq * rcq));
       }
       const fxp = F * dx / d, fyp = F * dy / d;
       fx[i] -= fxp; fy[i] -= fyp;
@@ -1548,10 +1577,12 @@
     const dx = this.x[j] - this.x[i], dy = this.y[j] - this.y[i];
     const d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
     const rc = pairRc[p];
-    if (d >= rc) return 0;
+    const ionic = this.ion[i] && this.ion[j], rcq = ionic ? pairRcIon[p] : rc;
+    if (d >= rc && (!ionic || d >= rcq)) return 0;
     if (this.isBonded(i, j) || this.isOneThree(i, j)) return 0;
-    const nb = this.nb;
-    let sigma = pairSigma[p];
+    if (d >= rc) return P.KC * P.ION_KC * this.q[i] * this.q[j] * (1 / d - 1 / rcq + (d - rcq) / (rcq * rcq));
+    const nb = this.nb, q = this.q;
+    let sigma = ionic ? (q[i] > 0 ? catR[ei] : anR[ei]) + (q[j] > 0 ? catR[ej] : anR[ej]) : pairSigma[p];
     const hbs = this.hbd[i] ? HB_ACCEPTOR[ej] : this.hbd[j] ? HB_ACCEPTOR[ei] : 0;
     if (hbs) sigma *= P.HB_CONTACT;
     else if (this.hbd[i] && this.hbd[j]) sigma *= P.HH_CONTACT;
@@ -1573,10 +1604,10 @@
     if (hbs) U += this.hbondEnergy(i, j, d, sigma, rc, hbs * P.HB_EPS * P.KB);
     const qq = this.q[i] * this.q[j];
     if (qq !== 0) {
-      const d0 = sigma * 0.8;
-      const irc2 = 1 / (rc * rc);
-      U += d >= d0 ? P.KC * qq * (1 / d - 1 / rc + (d - rc) * irc2)
-        : P.KC * qq * ((1 / d0 - 1 / rc + (d0 - rc) * irc2) + (d0 - d) * (1 / (d0 * d0) - irc2));
+      const d0 = sigma * 0.8, kc = ionic ? P.KC * P.ION_KC : P.KC;
+      const irc2 = 1 / (rcq * rcq);
+      U += d >= d0 ? kc * qq * (1 / d - 1 / rcq + (d - rcq) * irc2)
+        : kc * qq * ((1 / d0 - 1 / rcq + (d0 - rcq) * irc2) + (d0 - d) * (1 / (d0 * d0) - irc2));
     }
     return U;
   };
@@ -1953,6 +1984,7 @@
       if (canI !== canJ) {
         // radical abstraction: a free valence on one atom steals a bond unit from the other
         const a = canI ? i : j, b = canI ? j : i; // a has free valence, b must give one up
+        if (isMetal[el[a]] && this.dissociativeAdsorption(a, b, RT)) continue;
         const k = this.weakestBond(b, a);
         if (k < 0 || el[k] === el[a]) continue; // X. + X-Y -> X-Y + X. changes nothing
         const step = this._weakE;
@@ -2020,6 +2052,43 @@
         this.logReaction();
       }
     }
+  };
+
+  // A diatomic molecule X2 (O2, Cl2, ...) hitting a metal surface splits across two metal atoms:
+  // a takes b, a neighbouring metal atom m takes b's partner k (2 M + O2 -> 2 M-O). This is how
+  // metals oxidise and halogenate, and it leaves no stray O atoms or peroxides behind. Returns
+  // true when it happened.
+  S.dissociativeAdsorption = function (a, b, RT) {
+    if (this.nb[b] !== 1) return false;
+    const MB = P.MAXB, k = this.bp[b * MB], el = this.el;
+    if (el[k] !== el[b] || this.nb[k] !== 1 || isMetal[el[b]]) return false;
+    const eX = el[b], ord = this.bondOrder(b, k);
+    const pAB = el[a] * NZ + eX;
+    if (!C.pairClass[pAB]) return false;
+    // a second metal atom with a free valence next to k
+    const self = this, x = this.x, y = this.y;
+    let m = -1, best = Infinity;
+    this.query(x[k], y[k], 60, function (j) {
+      if (j === a || j === b || j === k || !isMetal[el[j]] || !self.canAccept(j, eX)) return;
+      const r = pairSigma[el[j] * NZ + eX] * 1.3, d2 = (x[j] - x[k]) ** 2 + (y[j] - y[k]) ** 2;
+      if (d2 < r * r && d2 < best) { best = d2; m = j; }
+    });
+    if (m < 0) return false;
+    const pMK = el[m] * NZ + eX;
+    if (!C.pairClass[pMK]) return false;
+    const eXX = C.bondEnergy(eX, eX, ord);
+    const dH = eXX - C.pairEnergy[pAB * 4 + 1] - C.pairEnergy[pMK * 4 + 1];
+    const spin = eX === 8 && ord === 2 ? P.SPIN_BARRIER : 0;
+    const Ea = P.ALPHA_DISS * eXX + Math.max(0, dH) + spin;
+    if (!(this.rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT))) || !this.canAfford(a, b, dH)) return false;
+    this.beginEvent(a, b, k, m);
+    this.setBond(b, k, 0);
+    this.addBond(a, b, 1, C.pairClass[pAB]);
+    this.addBond(m, k, 1, C.pairClass[pMK]);
+    this.endEvent(a, b);
+    this.heat(a, b, -dH);
+    this.logReaction();
+    return true;
   };
 
   // Thermal dissociation (Arrhenius) and pi-bond formation between radicals, per bond.
@@ -2509,12 +2578,22 @@
       if (dx * dx + dy * dy < r * r) atoms.push(j);
     });
     if (!atoms.length) { this.grab = null; return 0; }
-    this.grabSolidBodies(atoms);
+    const body = this.grabSolidBodies(atoms);
     let cx = 0, cy = 0;
     for (const j of atoms) { cx += this.x[j]; cy += this.y[j]; }
     cx /= atoms.length; cy /= atoms.length;
     // the hand holds the patch where it was taken: target = hand + (centre - hand at the start)
-    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0 };
+    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0, rigid: null };
+    // a held solid keeps the shape it had when picked up (shape matching, as for crystal grains):
+    // pushed against the glass it moves or stops as a whole instead of being squashed
+    if (body.length >= 3) {
+      let M = 0, bx = 0, by = 0;
+      for (const j of body) { const m = mass[this.el[j]]; M += m; bx += m * this.x[j]; by += m * this.y[j]; }
+      bx /= M; by /= M;
+      const ref = new Float64Array(2 * body.length);
+      body.forEach((j, k) => { ref[2 * k] = this.x[j] - bx; ref[2 * k + 1] = this.y[j] - by; });
+      this.grab.rigid = { atoms: body, ref: ref };
+    }
     this.held.fill(0);
     for (const j of atoms) this.held[j] = 1;
     return atoms.length;
@@ -2531,12 +2610,14 @@
       if (!kind) return self.isSolidAtom(i);
       return self.grainOf[c] >= 0 || self.tLoc[c] < self.crystalMeltT(c, kind) - 100;
     };
-    const queue = atoms.filter(solid);
+    const queue = atoms.filter(solid), body = queue.slice();
+    const inBody = this._grabBody || (this._grabBody = new Int32Array(P.MAX)), btag = ++this.markTag;
+    for (const i of body) inBody[i] = btag;
     while (queue.length && atoms.length < P.MAX) {
       const i = queue.pop(), ei = this.el[i];
       const add = function (j) {
         if (mark[j] === tag || !solid(j)) return;
-        mark[j] = tag; atoms.push(j); queue.push(j);
+        mark[j] = tag; atoms.push(j); queue.push(j); body.push(j); inBody[j] = btag;
       };
       for (let k = 0; k < this.nb[i]; k++) add(this.bp[i * MB + k]);
       this.query(this.x[i], this.y[i], this.cellSize, function (j) {
@@ -2549,8 +2630,13 @@
     // a molecule moves whole: its bonded atoms (the H of ice) come along
     for (let a = 0, len = atoms.length; a < len; a++) {
       const i = atoms[a];
-      for (let k = 0; k < this.nb[i]; k++) { const j = this.bp[i * MB + k]; if (mark[j] !== tag) { mark[j] = tag; atoms.push(j); } }
+      for (let k = 0; k < this.nb[i]; k++) {
+        const j = this.bp[i * MB + k];
+        if (mark[j] !== tag) { mark[j] = tag; atoms.push(j); }
+        if (inBody[i] === btag && inBody[j] !== btag) { inBody[j] = btag; body.push(j); }
+      }
     }
+    return body;
   };
   S.grabMove = function (x, y) {
     const g = this.grab;
@@ -2582,10 +2668,31 @@
       const i = A[k], m = mass[el[i]];
       this.fx[i] += m * ax; this.fy[i] += m * ay;
     }
+    const rg = g.rigid;
+    if (rg) {
+      // best-fit rotation of the reference shape onto the body now; springs to the fitted spots
+      // are internal (no net force or torque), so they keep the shape without moving the body
+      const B = rg.atoms, ref = rg.ref, kr = P.GRAB_RIGID;
+      let Mb = 0, bx = 0, by = 0;
+      for (let k = 0; k < B.length; k++) { const i = B[k], m = mass[el[i]]; Mb += m; bx += m * x[i]; by += m * y[i]; }
+      bx /= Mb; by /= Mb;
+      let sc = 0, ss = 0;
+      for (let k = 0; k < B.length; k++) {
+        const i = B[k], m = mass[el[i]], rx = x[i] - bx, ry = y[i] - by;
+        sc += m * (ref[2 * k] * rx + ref[2 * k + 1] * ry); ss += m * (ref[2 * k] * ry - ref[2 * k + 1] * rx);
+      }
+      const th = Math.atan2(ss, sc), c = Math.cos(th), s = Math.sin(th);
+      for (let k = 0; k < B.length; k++) {
+        const i = B[k], m = mass[el[i]];
+        const tx = bx + ref[2 * k] * c - ref[2 * k + 1] * s, ty = by + ref[2 * k] * s + ref[2 * k + 1] * c;
+        this.fx[i] += kr * m * (tx - x[i]); this.fy[i] += kr * m * (ty - y[i]);
+      }
+    }
   };
   // particle `from` moved into slot `to` (to is being removed and from is the last one)
   S.grabRenumber = function (to, from) {
     const A = this.grab.atoms;
+    this.grab.rigid = null; // the held body changed: let go of its shape
     this.held[to] = this.held[from]; this.held[from] = 0;
     const k = A.indexOf(to);
     if (k >= 0) { A[k] = A[A.length - 1]; A.pop(); }

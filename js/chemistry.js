@@ -53,7 +53,10 @@ Li-Li 105,Na-Na 74,K-K 57,Rb-Rb 49,Cs-Cs 44,Al-Cl 420,Al-O 512
     if (ea.maxValence === 0 || eb.maxValence === 0) return 0; // noble gases (He, Ne, Ar...)
     if (ea.isMetal && eb.isMetal) return 0; // metallic bonding handled as cohesion
     const d = Math.abs(ea.en - eb.en);
-    if (d >= 1.7 && (ea.isMetal || eb.isMetal)) return 2;
+    // a metal with a much more electronegative partner forms an ionic compound: textbook oxides,
+    // halides and sulfides of the metals (MgO, Fe2O3, CuO, NaCl). Pauling's 50%-ionic gap is 1.7;
+    // 1.5 also catches the transition-metal oxides (Fe-O 1.61, Cu-O 1.54), which are ionic solids
+    if (d >= 1.5 && (ea.isMetal || eb.isMetal)) return 2;
     return 1;
   }
 
@@ -65,8 +68,10 @@ Li-Li 105,Na-Na 74,K-K 57,Rb-Rb 49,Cs-Cs 44,Al-Cl 420,Al-O 512
     const cls = bondClass(a, b);
     if (cls === 0) return 0;
     if (cls === 2) {
-      // ionic: "order" counts transferred charge
-      return Math.min(E[a].maxValence, E[b].maxValence, 3);
+      // ionic: one bond unit per ion-ion contact, so a doubly or triply charged ion bonds to
+      // several counter-ions and the compound grows as an extended lattice with the textbook
+      // ratio ((MgO)n, (Al2O3)n, (Fe2O3)n) instead of closing into small Mg=O molecules
+      return 1;
     }
     if (a === 1 || b === 1) return 1;
     if (E[a].isMetal || E[b].isMetal) return Math.min(2, Math.min(E[a].maxValence, E[b].maxValence));
