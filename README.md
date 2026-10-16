@@ -46,7 +46,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube, and it keeps its shape while held (shoved into the glass it stops as a whole instead of being crushed); a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
+| Grab | Grab tool, then press on material and drag: the hand holds only what is under the cursor, and the rest follows through its own bonds. A solid metal lump comes up whole and survives being thrown at the glass, because its lattice is strong; a melt stretches, necks and drips; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -153,7 +153,12 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   an ideal lattice (the honeycomb of ice, the close-packed layer of a metal) fitted to its members
   by a best-fit rotation and shift (shape matching), and gentle conservative spring forces pull
   members toward their sites. Every join, leave and spring is energy-accounted, and members
-  melt off again when heated past the melting point. Ice grains are spaced so that ice takes up
+  melt off again when heated past the melting point. Metal crystals are much stiffer (their
+  springs scale with the melting point) and saturate at a yield displacement, so a cold metal is
+  elastic and strong all the time: lifted by one corner or thrown at the glass it holds together,
+  while a hard enough blow still yields it. Grains of a metal that touch are welded into one
+  solid, since real grain boundaries are nearly as strong as the crystals. Heat shakes the atoms
+  against their springs, and past the melting point the crystal lets go of them. Ice grains are spaced so that ice takes up
   about 7% more room than the liquid (real ice: 9%), so water swells as it freezes.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
