@@ -46,7 +46,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag: the patch under the cursor is pulled toward your hand and everything else follows only by its own cohesion, so you can feel how well things stick together. A solid lump lifts in one piece, a liquid stretches, necks and drips, a gas slips away. The pull is capped, so a small grip on a big solid can tear a piece off |
+| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube; a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -112,10 +112,14 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   off above about 373 K, Br₂ is liquid, I₂ and metals are solid, and N₂, O₂, Cl₂ and Ar are gases
   that condense near their real boiling points. Hydrogen bonds are directional: strongest when the
   O–H points straight at the neighbouring O, which is what lets water freeze into an ordered,
-  open lattice rather than a dense heap. Water oxygens also feel a three-body term after the
-  coarse-grained mW water model (Molinero & Moore, 2009) that prefers 120° O–O–O angles, the
-  hexagonal rings of ice Ih seen down its c axis, plus a weak two-body pull that lets the liquid
-  pack a little closer than the open ice.
+  open lattice rather than a dense heap. Water oxygens also feel a gentle three-body term after
+  the coarse-grained mW water model (Molinero & Moore, 2009) that leans toward 120° O–O–O angles,
+  the hexagonal rings of ice Ih seen down its c axis; it is kept weak so liquid water stays a
+  disordered, mobile jumble, and the ice honeycomb comes from the crystal engine below. Water also
+  gains a many-body cohesion only when a molecule is surrounded by others (in the liquid or ice),
+  never as a pair or a small clump, so steam stays a gas of separate molecules rather than drifting
+  droplets (in 2D, molecules meet far more often than in 3D, so pairwise stickiness alone would
+  cluster the vapour).
 - **Metallic cohesion** has two parts. A pair well scaled to the metal's melting point sets when
   the close-packed solid melts. A many-body embedding term (in the spirit of Finnis–Sinclair and
   embedded-atom models) rewards each atom for sitting inside dense metal, however that metal is
@@ -173,6 +177,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - Metal cohesion is calibrated on the melting point, so metals boil in the right order but
   low-melting metals boil too early (gallium well below its real 2477 K), and a molten metal
   shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
+- Evaporation rises too gently with temperature: in an insulated jar a small amount of water is
+  about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
+  450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
+  sharp boiling point; a hot plate well above the boiling point drives them off.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

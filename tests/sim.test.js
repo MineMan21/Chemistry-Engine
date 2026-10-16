@@ -195,30 +195,43 @@ test('phase data: documented points and phases', function () {
   });
 });
 
-test('water freezes into an ordered lattice and is recognised as a solid', function () {
-  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
-  const sim = newSim(12);
-  sim.react = function () {}; sim.bondEvents = function () {};
-  sim.addMolecules(H2O, 500, P.W / 2, P.H - 200, { x: 350, y: 150 });
-  sim.plateTemp = 200;
-  run(sim, 14); // the open ice lattice takes a little longer to grow than a dense one
-  const O = [];
-  for (let i = 0; i < sim.n; i++) if (sim.el[i] === 8) O.push(i);
-  let solid = 0, order = 0, counted = 0;
+// honeycomb (3-fold) order of water oxygens: 1 when every oxygen has its neighbours at 120 degrees
+function waterOrder(sim, onlyCrystal) {
+  const all = [];
+  for (let i = 0; i < sim.n; i++) if (sim.isWaterO(i)) all.push(i);
+  // the crystal's own structure: crystal members and their crystal neighbours
+  const O = onlyCrystal ? all.filter(function (i) { return sim.grainOf[i] >= 0; }) : all;
+  let order = 0, counted = 0;
   O.forEach(function (i) {
-    if (sim.isSolidAtom(i)) solid++;
-    // local hexagonal bond-orientational order of the oxygen lattice
     let re = 0, im = 0, k = 0;
     O.forEach(function (j) {
       if (j === i) return;
       const dx = sim.x[j] - sim.x[i], dy = sim.y[j] - sim.y[i];
-      if (dx * dx + dy * dy < 36 * 36) { const a = 6 * Math.atan2(dy, dx); re += Math.cos(a); im += Math.sin(a); k++; }
+      if (dx * dx + dy * dy < 36 * 36) { const a = 3 * Math.atan2(dy, dx); re += Math.cos(a); im += Math.sin(a); k++; }
     });
     if (k >= 2) { order += Math.hypot(re, im) / k; counted++; }
   });
+  return { O: all, psi3: order / counted };
+}
+
+test('water is a disordered liquid at 300 K and freezes into a honeycomb crystal at 200 K', function () {
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const sim = newSim(12);
+  sim.react = function () {}; sim.bondEvents = function () {};
+  sim.addMolecules(H2O, 500, P.W / 2, P.H - 200, { x: 350, y: 150 });
+  sim.plateTemp = 300;
+  run(sim, 4);
+  const liquid = waterOrder(sim).psi3;
+  assert.ok(liquid < 0.6, 'liquid water is disordered: honeycomb order ' + liquid.toFixed(2));
+  sim.plateTemp = 200;
+  run(sim, 16);
+  const ice = waterOrder(sim, true), O = ice.O;
+  let solid = 0, crystal = 0;
+  O.forEach(function (i) { if (sim.isSolidAtom(i)) solid++; if (sim.grainOf[i] >= 0) crystal++; });
   assert.ok(sim.temperature < 260, 'cooled to ' + sim.temperature);
   assert.ok(solid > 0.8 * O.length, 'ice counted as solid: ' + solid + ' of ' + O.length);
-  assert.ok(order / counted > 0.7, 'lattice order psi6 ' + (order / counted).toFixed(2));
+  assert.ok(crystal > 0.5 * O.length, 'ice is crystalline: ' + crystal + ' of ' + O.length + ' in crystal grains');
+  assert.ok(ice.psi3 > 0.8, 'ice crystal is a honeycomb: order ' + ice.psi3.toFixed(2));
 });
 
 // order and mobility of the atoms of element z: hexagonal order psi6, fraction in crystal grains,
@@ -306,7 +319,7 @@ test('mercury is a liquid at room temperature', function () {
   assert.ok(s.vapour < 0.05, 'mercury stays mostly liquid: ' + JSON.stringify(s));
 });
 
-test('the grab tool lifts a solid iron lump in one piece', function () {
+test('the grab tool lifts a solid iron lump in one piece from a small grip', function () {
   const sim = newSim(24);
   const fe = Z('Fe');
   sim.addMoles(fe, 0.3, P.W / 2, P.H - 150);
@@ -315,7 +328,8 @@ test('the grab tool lifts a solid iron lump in one piece', function () {
   for (let i = 0; i < sim.n; i++) top = Math.min(top, sim.y[i]);
   for (let i = 0; i < sim.n; i++) if (sim.y[i] < top + 60) { cx += sim.x[i]; c++; }
   cx /= c;
-  assert.ok(sim.grabStart(cx, top + 70, 150) > 20, 'grabbed a handful of atoms');
+  // a small grip on a solid takes the whole connected solid
+  assert.strictEqual(sim.grabStart(cx, top + 70, 40), sim.n, 'the whole solid lump is held');
   const steps = Math.round(3 / P.DT);
   for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 70 - 900 * s / steps); sim.step(6); }
   run(sim, 1);
