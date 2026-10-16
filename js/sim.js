@@ -27,19 +27,20 @@
     PARTIAL_CHARGE: 0.3, // partial charge per unit electronegativity difference
     VDW_SCALE: 2.25, // calibration factor for van der Waals well depths (2D, short-ranged well)
     MOL_POLARIZABILITY: 0, // (disabled) per-bond dispersion boost; it made bonding exothermic
-    HB_EPS: 1100, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker
+    HB_EPS: 800, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker (water gets more of
+    // its cohesion from the many-body W2 term below, so lone pairs in the vapour stay apart)
     HB_ANGLE_POW: 2, // directionality of hydrogen bonds: strength ~ cos^n of the D-H...A bend
     HB_ACCEPT_POW: 2, // ...and of the acceptor side: along the lone pair of a two-bonded O/N/F
     HB_FLAT_LO: 0.6, HB_FLAT_HI: 1.15, // (see HB_FLAT_* note below)
     HH_CONTACT: 0.65, // H...H contact of two O-H/N-H/F-H hydrogens (they overlap in a flattened view)
-    W3_EPS: 500, // water network angle stiffness (K), see waterAngle(); gentle, so the liquid stays
+    W3_EPS: 250, // water network angle stiffness (K), see waterAngle(); gentle, so the liquid stays
     // disordered (ice gets its honeycomb from the crystal engine)
     // cohesion (K per molecule) of water inside liquid or ice: -W2_EPS smoothstep over the number
     // of neighbouring water oxygens from W2_RHO_A to W2_RHO_B. A pair or a small clump in the
     // vapour gets none of it, so steam stays a gas of single molecules instead of drifting clusters
-    W2_EPS: 1600,
+    W2_EPS: 2000,
     W2_RHO_A: 1.2,
-    W2_RHO_B: 2.8,
+    W2_RHO_B: 3.2,
     W3_RANGE: 40, // ...its range (units)...
     W3_INNER: 32, // ...full strength out to here, past the hydrogen-bonded O...O distance (~28)
     W2_RANGE: 40, // reach of a water neighbour in that count...
