@@ -412,8 +412,15 @@ test('iron is untouched by oxygen at room temperature and oxidises to Fe2O3/Fe3O
   // hematite Fe2O3 is O:Fe 1.5, magnetite Fe3O4 1.33, wustite FeO 1; a thin scale on the metal
   // reads a little O-rich (its outermost oxygens are bound to one iron only)
   assert.ok(c.ratio > 1.0 && c.ratio < 1.7, 'iron oxide composition O:Fe ' + c.ratio.toFixed(2));
-  const peroxide = speciesWith(hot, function (k) { return k[fe] && k[o] > 2 * k[fe]; }).length;
-  assert.ok(peroxide === 0, 'no iron peroxides or superoxides');
+  // no peroxide or superoxide (O-O bonds) on the iron
+  let peroxide = 0;
+  for (let i = 0; i < hot.n; i++) {
+    if (hot.el[i] !== o) continue;
+    let toFe = false, toO = false;
+    for (let k = 0; k < hot.nb[i]; k++) { const f = hot.el[hot.bp[i * P.MAXB + k]]; if (f === fe) toFe = true; if (f === o) toO = true; }
+    if (toFe && toO) peroxide++;
+  }
+  assert.ok(peroxide === 0, 'no iron peroxides or superoxides: ' + peroxide + ' O-O bonds on iron');
 });
 
 test('wet iron rusts to hydroxides and oxides, not iron hydrides', function () {

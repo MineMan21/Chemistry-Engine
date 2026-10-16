@@ -154,7 +154,7 @@
   // own many-body cohesion (W2) and is left at 1.
   const COHESION = {
     N2: 1.82, O2: 2.30, F2: 2.77, Cl2: 2.00, Br2: 0.59, I2: 0.71,
-    CO2: 1.66, CH4: 1.19, CO: 0.68, ClH: 0.90, H3N: 0.43, C2H6O: 1.31, H2O2: 0.90
+    CO2: 1.66, CH4: 1.19, CO: 0.68, ClH: 0.90, H3N: 0.43, C2H6O: 2.17, C6H6: 2.24, H2O2: 0.93
   };
 
   // Per-element constants
@@ -1171,7 +1171,8 @@
       let adhered = false;
       if (x[i] < rw + adhR || x[i] > W - rw - adhR || y[i] > H - rw - adhR) {
         const z = el[i];
-        const eA = (wallAdh[z] + ((this.hbd[i] || (HB_ACCEPTOR[z] && this.nb[i])) ? P.WALL_HB : 0)) * P.KB * im;
+        // glass is a polar, ionic surface: hydrogen bonders and ions (salt deposits) cling to it
+        const eA = (wallAdh[z] + ((this.hbd[i] || (HB_ACCEPTOR[z] && this.nb[i]) || this.ion[i]) ? P.WALL_HB : 0)) * P.KB * im;
         let d = x[i] - rw, pull = 0;
         if (d >= 0 && d < adhR) { const s = d / adhR; pull = 4 * eA * s * (1 - s * s) / adhR; wfx -= pull; adhered = true; }
         d = W - rw - x[i];
@@ -1998,6 +1999,8 @@
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
       const cls = C.pairClass[p];
       if (!cls) continue;
+      // an ion does not bond to its own kind (no O-O peroxide chains on an oxide, no Cl-Cl on a salt)
+      if (ei === ej && (this.ion[i] || this.ion[j])) continue;
       const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
       const RT = P.R_KJ * Math.max(T, 1);
       const E1 = C.pairEnergy[p * 4 + 1];
@@ -2016,7 +2019,14 @@
       if (canI !== canJ) {
         // radical abstraction: a free valence on one atom steals a bond unit from the other
         const a = canI ? i : j, b = canI ? j : i; // a has free valence, b must give one up
-        if (isMetal[el[a]] && this.dissociativeAdsorption(a, b, RT)) continue;
+        if (isMetal[el[a]]) {
+          if (this.dissociativeAdsorption(a, b, RT)) continue;
+          // a metal surface does not half-open O2 or Cl2 into a peroxide or superoxide (M-O-O.) or
+          // knock a lone O atom off it: diatomics split across two metal atoms (above). A lone metal
+          // atom in the gas does pluck one atom off a halogen (Na + Cl2 -> NaCl + Cl, the harpoon
+          // reaction), but not off spin-paired O2
+          if (this.nb[b] === 1 && el[this.bp[b * P.MAXB]] === el[b] && !isMetal[el[b]] && (el[b] === 8 || this.hasMetalNeighbour(a))) continue;
+        }
         const k = this.weakestBond(b, a);
         if (k < 0 || el[k] === el[a]) continue; // X. + X-Y -> X-Y + X. changes nothing
         const step = this._weakE;
@@ -2089,6 +2099,16 @@
     }
   };
 
+  S.hasMetalNeighbour = function (a) {
+    const self = this, x = this.x, y = this.y, el = this.el, r = pairSigma[el[a] * NZ + el[a]] * 1.5;
+    let found = false;
+    this.query(x[a], y[a], r, function (j) {
+      if (found || j === a || !isMetal[el[j]]) return;
+      if ((x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 < r * r) found = true;
+    });
+    return found;
+  };
+
   // A diatomic molecule X2 (O2, Cl2, ...) hitting a metal surface splits across two metal atoms:
   // a takes b, a neighbouring metal atom m takes b's partner k (2 M + O2 -> 2 M-O). This is how
   // metals oxidise and halogenate, and it leaves no stray O atoms or peroxides behind. Returns
@@ -2100,12 +2120,15 @@
     const eX = el[b], ord = this.bondOrder(b, k);
     const pAB = el[a] * NZ + eX;
     if (!C.pairClass[pAB]) return false;
-    // a second metal atom with a free valence next to k
+    // a second metal atom with a free valence: a surface neighbour of a, the one nearest to k (the
+    // molecule tips over onto it as it splits)
     const self = this, x = this.x, y = this.y;
     let m = -1, best = Infinity;
-    this.query(x[k], y[k], 60, function (j) {
+    this.query(x[a], y[a], pairSigma[el[a] * NZ + el[a]] * 1.5, function (j) {
       if (j === a || j === b || j === k || !isMetal[el[j]] || !self.canAccept(j, eX)) return;
-      const r = pairSigma[el[j] * NZ + eX] * 1.3, d2 = (x[j] - x[k]) ** 2 + (y[j] - y[k]) ** 2;
+      const ra = pairSigma[el[a] * NZ + el[j]] * 1.5;
+      if ((x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 > ra * ra) return;
+      const r = pairSigma[el[j] * NZ + eX] * 2.2, d2 = (x[j] - x[k]) ** 2 + (y[j] - y[k]) ** 2;
       if (d2 < r * r && d2 < best) { best = d2; m = j; }
     });
     if (m < 0) return false;
