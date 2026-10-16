@@ -149,7 +149,13 @@
   // Cohesion factors of documented molecular substances, scaling their van der Waals and hydrogen-
   // bond attraction so that each boils near its real boiling point (calibrated against the
   // documented vapour pressures; see README). Substances not listed use 1.
-  const COHESION = {};
+  // Each factor was bisected so that 400 molecules in the insulated jar are half condensed at the
+  // temperature where the real substance would be (from its vapour-pressure curve). Water has its
+  // own many-body cohesion (W2) and is left at 1.
+  const COHESION = {
+    N2: 1.82, O2: 2.30, F2: 2.77, Cl2: 2.00, Br2: 0.59, I2: 0.71,
+    CO2: 1.66, CH4: 1.19, CO: 0.68, ClH: 0.90, H3N: 0.43, C2H6O: 1.31, H2O2: 0.90
+  };
 
   // Per-element constants
   const mass = new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
@@ -864,6 +870,22 @@
     rho.fill(0, 0, n);
     let nFs = 0;
 
+    // atoms three bonds apart (opposite corners of a ring) touch within one molecule: that is not
+    // being packed in a liquid, so it must not count as a contact (a lone benzene molecule would
+    // otherwise count as condensed and drop like a liquid)
+    function oneFour(i, j) {
+      const bi = i * MB;
+      for (let k = 0; k < nb[i]; k++) {
+        const a = bp[bi + k], ba = a * MB;
+        for (let l = 0; l < nb[a]; l++) {
+          const b = bp[ba + l], bb = b * MB;
+          if (b === i) continue;
+          for (let m = 0; m < nb[b]; m++) if (bp[bb + m] === j) return true;
+        }
+      }
+      return false;
+    }
+
     function pair(i, j) {
       const dx = x[j] - x[i], dy = y[j] - y[i];
       const d2 = dx * dx + dy * dy;
@@ -915,7 +937,7 @@
       if (d < sigma) {
         const mu = mass[ei] * mass[ej] / (mass[ei] + mass[ej]);
         F = (hbs ? P.HB_REP_SCALE : 1) * P.K_REP * mu * (sigma - d);
-        contacts[i]++; contacts[j]++;
+        if (!(nb[i] && nb[j] && oneFour(i, j))) { contacts[i]++; contacts[j]++; }
         if (self.nCand < maxCand && C.pairClass[p]) {
           self.candI[self.nCand] = i; self.candJ[self.nCand] = j; self.nCand++;
         }
@@ -929,7 +951,7 @@
           if (coh[i] !== 1 || coh[j] !== 1) eps *= coh[i] === coh[j] ? coh[i] : Math.sqrt(coh[i] * coh[j]);
         }
         F = -4 * eps * s * (1 - s * s) / w;
-        if (s < 0.25) { contacts[i]++; contacts[j]++; }
+        if (s < 0.25 && !(nb[i] && nb[j] && oneFour(i, j))) { contacts[i]++; contacts[j]++; }
         // radicals capture partners a little before hard contact (larger reactive cross-section)
         if (s < P.RADICAL_CAPTURE && self.nCand < maxCand && C.pairClass[p] && nb[i] <= 1 && nb[j] <= 1 &&
             (used[i] < maxVal[ei] || used[j] < maxVal[ej])) {

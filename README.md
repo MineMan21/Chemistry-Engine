@@ -46,7 +46,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube; a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
+| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube, and it keeps its shape while held (shoved into the glass it stops as a whole instead of being crushed); a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -132,6 +132,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   never as a pair or a small clump, so steam stays a gas of separate molecules rather than drifting
   droplets (in 2D, molecules meet far more often than in 3D, so pairwise stickiness alone would
   cluster the vapour).
+- **Boiling points are calibrated per substance.** The generic rules (van der Waals wells from
+  each element, hydrogen bonds, partial charges) put some substances' boiling points far off, so
+  documented molecular substances carry a cohesion factor on their van der Waals and hydrogen-
+  bond attraction: N₂, O₂, F₂, Cl₂, Br₂, I₂, CO₂, CH₄, CO, HCl, NH₃, ethanol, benzene and H₂O₂.
+  Each was bisected so that a fixed amount in the jar is half evaporated at the temperature where
+  the real substance (by its documented vapour pressure) would be. When a reaction turns a
+  molecule into another substance, the change in its attraction is settled as heat.
 - **Metallic cohesion** has two parts. A pair well scaled to the metal's melting point sets when
   the close-packed solid melts. A many-body embedding term (in the spirit of Finnis–Sinclair and
   embedded-atom models) rewards each atom for sitting inside dense metal, however that metal is
