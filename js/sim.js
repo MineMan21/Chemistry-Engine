@@ -59,7 +59,15 @@
     ANNEAL_ANGLE: 0.5, // ...turning a molecule by up to this many radians...
     ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
     ICE_A: 31, // O-O spacing of the ice honeycomb: wide enough that ice takes ~7% more room than the liquid (real: 9%)
-    CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites
+    CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites (ice)
+    // A metal crystal is far stiffer: its lattice springs are CRYSTAL_K_PER_MP (1/s^2 per K of
+    // melting point) and saturate after CRYSTAL_W_METAL units of displacement, so the solid is
+    // elastic and strong (it does not deform when dropped or thrown) yet a hard enough blow yields
+    // it instead of storing unlimited energy. Heat shakes atoms against the springs, and past the
+    // melting point the crystal lets go of them.
+    CRYSTAL_K_PER_MP: 8,
+    CRYSTAL_W_METAL: 5,
+    CRYSTAL_JOIN_MAX_METAL: 2500, // join strain allowance (K) for metal crystals
     CRYSTAL_TRIES: 0.6, // join/nucleation attempts per atom every 4 substeps
     CRYSTAL_JOIN_MAX: 600, // a unit joins only if its new spring is strained by at most this (K)
     CRYSTAL_HYST: 20, // members melt this far (K) above the melting point
@@ -82,8 +90,8 @@
     METAL_RHO_B: 3.5,
     METAL_RC_FACTOR: 1.45, // reach of metal-metal attraction, in contact distances
     GRAB_OMEGA: 25, // grab tool: stiffness of the pull toward the hand (1/s)...
-    GRAB_RIGID: 20000, // ...and how firmly a held solid keeps its shape (1/s^2)
-    GRAB_MAX_ACCEL: 8000, // ...and its strongest pull (units/s^2, ~12x the settling force)
+    GRAB_MAX_ACCEL: 20000, // ...and its strongest pull (units/s^2): a firm grip, below what a metal
+    // lattice bond can hold, so a solid comes along whole while a liquid tears
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
@@ -2410,7 +2418,9 @@
   S.crystalEnergy = function (g, forces) {
     if (!g.mem.length) return 0;
     this.crystalFit(g);
-    const x = this.x, y = this.y, c = Math.cos(g.th), sn = Math.sin(g.th), k = P.CRYSTAL_K;
+    const x = this.x, y = this.y, c = Math.cos(g.th), sn = Math.sin(g.th);
+    const metal = g.kind === 2, k = metal ? P.CRYSTAL_K_PER_MP * meltK[g.z] : P.CRYSTAL_K;
+    const w2 = metal ? P.CRYSTAL_W_METAL * P.CRYSTAL_W_METAL : 0;
     let U = 0;
     for (let q0 = 0; q0 < g.mem.length; q0++) {
       const u = g.mem[q0];
@@ -2418,9 +2428,16 @@
         const i = u.atoms[q], m = mass[this.el[i]];
         const ax = u.rest[2 * q] - g.sx, ay = u.rest[2 * q + 1] - g.sy;
         const gx = g.cx + ax * c - ay * sn, gy = g.cy + ax * sn + ay * c;
-        const dx = x[i] - gx, dy = y[i] - gy;
-        U += 0.5 * k * m * (dx * dx + dy * dy);
-        if (forces) { this.fx[i] -= k * m * dx; this.fy[i] -= k * m * dy; }
+        const dx = x[i] - gx, dy = y[i] - gy, d2 = dx * dx + dy * dy;
+        if (w2) {
+          // saturating spring: harmonic near the site, levelling off at k m w^2 (yield)
+          const e = Math.exp(-d2 / (2 * w2));
+          U += k * m * w2 * (1 - e);
+          if (forces) { this.fx[i] -= k * m * e * dx; this.fy[i] -= k * m * e * dy; }
+        } else {
+          U += 0.5 * k * m * d2;
+          if (forces) { this.fx[i] -= k * m * dx; this.fy[i] -= k * m * dy; }
+        }
       }
     }
     return U;
@@ -2486,9 +2503,64 @@
   };
 
   // Joining, nucleation and melting, every few substeps.
+  // Grains of a metal that touch are welded into one solid: in a real metal the grain boundaries
+  // are nearly as strong as the crystals, so a cast lump holds together as one piece. The smaller
+  // grain's lattice sites are carried over into the larger grain's frame (keeping their own
+  // orientation), and the change in spring energy is settled as heat.
+  S.crystalMerge = function () {
+    const grains = this.grains, x = this.x, y = this.y, self = this;
+    if (grains.length < 2) return;
+    const touch = new Map();
+    for (let gi = 0; gi < grains.length; gi++) {
+      const g = grains[gi];
+      if (g.kind !== 2 || !g.mem.length) continue;
+      const r = g.a * 1.25;
+      for (const u of g.mem) {
+        const i = u.atoms[0];
+        this.query(x[i], y[i], r, function (j) {
+          const gj = self.grainOf[j];
+          if (gj < 0 || gj === gi || grains[gj].kind !== 2 || grains[gj].z !== g.z) return;
+          if ((x[j] - x[i]) ** 2 + (y[j] - y[i]) ** 2 > r * r) return;
+          const key = gi < gj ? gi + ':' + gj : gj + ':' + gi;
+          touch.set(key, (touch.get(key) || 0) + 1);
+        });
+      }
+    }
+    const merged = new Set();
+    for (const [key, cnt] of touch) {
+      if (cnt < 6) continue; // a real boundary, not a stray touch
+      let [ga, gb] = key.split(':').map(Number);
+      if (merged.has(ga) || merged.has(gb)) continue;
+      let A = grains[ga], B = grains[gb];
+      if (B.mem.length > A.mem.length) { const t = A; A = B; B = t; const ti = ga; ga = gb; gb = ti; }
+      this._crystalBusy = true;
+      const U0 = this.crystalEnergy(A, false) + this.crystalEnergy(B, false);
+      const c = Math.cos(B.th), sn = Math.sin(B.th);
+      this._mergeId = (this._mergeId || 0) + 1;
+      for (const u of B.mem) {
+        const rest = [];
+        for (let q = 0; q < u.atoms.length; q++) {
+          const ax = u.rest[2 * q] - B.sx, ay = u.rest[2 * q + 1] - B.sy;
+          const r = this.crystalToRest(A, B.cx + ax * c - ay * sn, B.cy + ax * sn + ay * c);
+          rest.push(r[0], r[1]);
+        }
+        const mu = { atoms: u.atoms, rest: rest, key: 'm' + this._mergeId + ':' + u.key };
+        A.mem.push(mu); A.sites.set(mu.key, mu);
+        for (const i of u.atoms) this.grainOf[i] = ga;
+      }
+      B.mem = []; B.sites = new Map();
+      const U1 = this.crystalEnergy(A, false);
+      const i0 = A.mem[0].atoms[0];
+      if (U1 !== U0) this.heatRaw(i0, this.crystalPartner(i0), U0 - U1);
+      this._crystalBusy = false;
+      merged.add(ga); merged.add(gb);
+    }
+  };
+
   S.crystalUpdate = function () {
     const n = this.n, x = this.x, y = this.y, rng = this.rng, self = this;
     if (!P.CRYSTAL_K || !n) return;
+    if ((this._crystalCalls = (this._crystalCalls || 0) + 1) % 16 === 0) this.crystalMerge();
     // melting and dislodged members leave
     for (let gi = 0; gi < this.grains.length; gi++) {
       const g = this.grains[gi];
@@ -2537,7 +2609,7 @@
         const r = this.crystalToRest(g, x[i], y[i]);
         const site = this.crystalSite(g, r[0], r[1]);
         if (g.sites.has(site.key) || Math.hypot(site.x - r[0], site.y - r[1]) > 0.45 * a) continue;
-        this.crystalJoin(g, i, site, P.CRYSTAL_JOIN_MAX * P.KB);
+        this.crystalJoin(g, i, site, (g.kind === 2 ? P.CRYSTAL_JOIN_MAX_METAL : P.CRYSTAL_JOIN_MAX) * P.KB);
         continue;
       }
       // nobody to join: nucleate a new grain (readily on the glass, rarely in the bulk)
@@ -2638,10 +2710,8 @@
   // Grab: the user picks up the material under the cursor and drags it. The grabbed atoms share
   // one uniform pull (a critically damped spring from their centre of mass to the hand, capped),
   // so their own thermal motion is left alone and nothing is heated or frozen by holding it.
-  // A solid is held as a whole: grabbing any part of it takes the entire connected solid body
-  // (a hand cannot tear iron or snap an ice cube's lattice), which the even pull then moves
-  // without straining it. A liquid is held only where it is grabbed and the rest follows through
-  // its own cohesion, so it stretches, necks and drips; a gas slips away.
+  // Everything else follows only through its own bonds: a solid comes along as a lump because its
+  // lattice is strong, a liquid stretches, necks and drips, a gas slips away.
   // ---------------------------------------------------------------------------------------
   S.grabStart = function (x, y, r) {
     this.buildGrid();
@@ -2652,65 +2722,14 @@
       if (dx * dx + dy * dy < r * r) atoms.push(j);
     });
     if (!atoms.length) { this.grab = null; return 0; }
-    const body = this.grabSolidBodies(atoms);
     let cx = 0, cy = 0;
     for (const j of atoms) { cx += this.x[j]; cy += this.y[j]; }
     cx /= atoms.length; cy /= atoms.length;
     // the hand holds the patch where it was taken: target = hand + (centre - hand at the start)
-    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0, rigid: null };
-    // a held solid keeps the shape it had when picked up (shape matching, as for crystal grains):
-    // pushed against the glass it moves or stops as a whole instead of being squashed
-    if (body.length >= 3) {
-      let M = 0, bx = 0, by = 0;
-      for (const j of body) { const m = mass[this.el[j]]; M += m; bx += m * this.x[j]; by += m * this.y[j]; }
-      bx /= M; by /= M;
-      const ref = new Float64Array(2 * body.length);
-      body.forEach((j, k) => { ref[2 * k] = this.x[j] - bx; ref[2 * k + 1] = this.y[j] - by; });
-      this.grab.rigid = { atoms: body, ref: ref };
-    }
+    this.grab = { atoms: atoms, hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0 };
     this.held.fill(0);
     for (const j of atoms) this.held[j] = 1;
     return atoms.length;
-  };
-  // Extends `atoms` with every solid atom connected (in contact or bonded) to a grabbed solid atom.
-  S.grabSolidBodies = function (atoms) {
-    const mark = this.mark, tag = ++this.markTag, self = this, MB = P.MAXB;
-    for (const i of atoms) mark[i] = tag;
-    // solid: in a crystal grain (or well below the melting point) for substances that crystallise,
-    // so a cool spot in a melt does not count; otherwise the usual solid test
-    const solid = function (i) {
-      let c = i, kind = self.crystalKind(i);
-      if (!kind && self.nb[i] === 1 && self.isWaterO(self.bp[i * MB])) { c = self.bp[i * MB]; kind = 1; }
-      if (!kind) return self.isSolidAtom(i);
-      return self.grainOf[c] >= 0 || self.tLoc[c] < self.crystalMeltT(c, kind) - 100;
-    };
-    const queue = atoms.filter(solid), body = queue.slice();
-    const inBody = this._grabBody || (this._grabBody = new Int32Array(P.MAX)), btag = ++this.markTag;
-    for (const i of body) inBody[i] = btag;
-    while (queue.length && atoms.length < P.MAX) {
-      const i = queue.pop(), ei = this.el[i];
-      const add = function (j) {
-        if (mark[j] === tag || !solid(j)) return;
-        mark[j] = tag; atoms.push(j); queue.push(j); body.push(j); inBody[j] = btag;
-      };
-      for (let k = 0; k < this.nb[i]; k++) add(this.bp[i * MB + k]);
-      this.query(this.x[i], this.y[i], this.cellSize, function (j) {
-        if (j === i) return;
-        const r = pairSigma[ei * NZ + self.el[j]] * 1.3;
-        const dx = self.x[j] - self.x[i], dy = self.y[j] - self.y[i];
-        if (dx * dx + dy * dy < r * r) add(j);
-      });
-    }
-    // a molecule moves whole: its bonded atoms (the H of ice) come along
-    for (let a = 0, len = atoms.length; a < len; a++) {
-      const i = atoms[a];
-      for (let k = 0; k < this.nb[i]; k++) {
-        const j = this.bp[i * MB + k];
-        if (mark[j] !== tag) { mark[j] = tag; atoms.push(j); }
-        if (inBody[i] === btag && inBody[j] !== btag) { inBody[j] = btag; body.push(j); }
-      }
-    }
-    return body;
   };
   S.grabMove = function (x, y) {
     const g = this.grab;
@@ -2742,31 +2761,10 @@
       const i = A[k], m = mass[el[i]];
       this.fx[i] += m * ax; this.fy[i] += m * ay;
     }
-    const rg = g.rigid;
-    if (rg) {
-      // best-fit rotation of the reference shape onto the body now; springs to the fitted spots
-      // are internal (no net force or torque), so they keep the shape without moving the body
-      const B = rg.atoms, ref = rg.ref, kr = P.GRAB_RIGID;
-      let Mb = 0, bx = 0, by = 0;
-      for (let k = 0; k < B.length; k++) { const i = B[k], m = mass[el[i]]; Mb += m; bx += m * x[i]; by += m * y[i]; }
-      bx /= Mb; by /= Mb;
-      let sc = 0, ss = 0;
-      for (let k = 0; k < B.length; k++) {
-        const i = B[k], m = mass[el[i]], rx = x[i] - bx, ry = y[i] - by;
-        sc += m * (ref[2 * k] * rx + ref[2 * k + 1] * ry); ss += m * (ref[2 * k] * ry - ref[2 * k + 1] * rx);
-      }
-      const th = Math.atan2(ss, sc), c = Math.cos(th), s = Math.sin(th);
-      for (let k = 0; k < B.length; k++) {
-        const i = B[k], m = mass[el[i]];
-        const tx = bx + ref[2 * k] * c - ref[2 * k + 1] * s, ty = by + ref[2 * k] * s + ref[2 * k + 1] * c;
-        this.fx[i] += kr * m * (tx - x[i]); this.fy[i] += kr * m * (ty - y[i]);
-      }
-    }
   };
   // particle `from` moved into slot `to` (to is being removed and from is the last one)
   S.grabRenumber = function (to, from) {
     const A = this.grab.atoms;
-    this.grab.rigid = null; // the held body changed: let go of its shape
     this.held[to] = this.held[from]; this.held[from] = 0;
     const k = A.indexOf(to);
     if (k >= 0) { A[k] = A[A.length - 1]; A.pop(); }
