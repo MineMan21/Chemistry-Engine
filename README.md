@@ -76,9 +76,17 @@ so the engine uses rules driven by real element data (`js/elements.js`: mass, Pa
 electronegativity, covalent radius, common valences, melting and boiling points).
 
 - **Bond type.** Two metals do not form discrete bonds; they hold together by metallic
-  cohesion (see Phases below). A metal with an electronegativity gap of at
-  least 1.7 forms ionic bonds. Everything else bonds covalently. Noble gases only bond to more
-  electronegative partners when they have valences beyond 0 (Xe, Kr, Rn).
+  cohesion (see Phases below). A metal with an electronegativity gap of at least 1.5 to its
+  partner forms ionic bonds (the oxides, halides and sulfides of the metals: MgO, Fe₂O₃, CuO,
+  NaCl). Everything else bonds covalently. Noble gases only bond to more electronegative partners
+  when they have valences beyond 0 (Xe, Kr, Rn). Only strongly electropositive metals form
+  hydrides (LiH, NaH, CaH₂, MgH₂); iron, copper and the other transition metals do not.
+- **Ionic compounds are lattices.** Each ion–ion contact carries one unit of charge, so a doubly
+  or triply charged ion bonds to several counter-ions and the compound grows as an extended
+  lattice with its textbook ratio ((MgO)n, (Al₂O₃)n, iron's Fe₂O₃ and Fe₃O₄) instead of closing
+  into small molecules. Ions touch at ionic radii (cations shrink, anions swell: Na⁺ 102 pm,
+  Cl⁻ 181 pm) and feel each other's full charges over a longer range, so salts and oxides are
+  solids.
 - **Valence.** Each element has allowed valences. Going beyond the normal one (for example
   SF₆ or PCl₅) needs a more electronegative partner.
 - **Bond energies.** Measured average bond enthalpies for about 100 common bonds (H–O 459,
@@ -90,6 +98,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   - radical + radical → bond (almost no barrier),
   - radical abstraction (a free valence steals a bond unit, e.g. Na + Cl₂ → NaCl + Cl),
   - atom transfer in hot zones (H + O₂ → OH + O), which branches flame chains,
+  - a diatomic molecule splitting across a metal surface (2 M + O₂ → 2 M–O, 2 Na + Cl₂ → 2 NaCl),
+    which is how metals oxidise: no stray O atoms or peroxides,
+  - alkali and alkaline-earth metals react by electron transfer, with almost no barrier
+    beyond the reaction enthalpy (sodium in water),
   - four-centre exchange AB + CD → AC + BD (largely forbidden, so it needs high temperature),
   - thermal dissociation of the weakest bond unit, and pi bonds forming between radicals.
 
@@ -181,6 +193,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
   450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
   sharp boiling point; a hot plate well above the boiling point drives them off.
+- Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
+  (spark) → HCl, Na + Cl₂ → solid NaCl, metals burning to their oxides (MgO, Al₂O₃, iron's Fe₂O₃
+  and Fe₃O₄, CuO), wet iron corroding to hydroxides, no ammonia from N₂ + H₂ without a catalyst.
+  Still poorly reproduced: hydrocarbon flames stop at peroxides and alcohols instead of going all
+  the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled), solid
+  carbon and sulfur hardly burn, hydrogen peroxide does not decompose on heating, and sodium
+  reacts with water only at its surface and slowly.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

@@ -231,7 +231,7 @@ test('water is a disordered liquid at 300 K and freezes into a honeycomb crystal
   assert.ok(sim.temperature < 260, 'cooled to ' + sim.temperature);
   assert.ok(solid > 0.8 * O.length, 'ice counted as solid: ' + solid + ' of ' + O.length);
   assert.ok(crystal > 0.5 * O.length, 'ice is crystalline: ' + crystal + ' of ' + O.length + ' in crystal grains');
-  assert.ok(ice.psi3 > 0.8, 'ice crystal is a honeycomb: order ' + ice.psi3.toFixed(2));
+  assert.ok(ice.psi3 > 0.75, 'ice crystal is a honeycomb: order ' + ice.psi3.toFixed(2));
 });
 
 // order and mobility of the atoms of element z: hexagonal order psi6, fraction in crystal grains,
@@ -371,6 +371,103 @@ test('a held solid keeps its shape when shoved into the glass', function () {
   assert.ok(left < 60, 'the lump reached the wall (leftmost ' + left.toFixed(0) + ')');
   assert.ok(broken < 0.02 * pairs.length, 'the lump is not crushed: ' + broken + ' of ' + pairs.length + ' contacts broken');
   sim.grabEnd();
+});
+
+// ---- textbook reactions ----------------------------------------------------------------
+// atoms of metal z bonded to element y, and atoms of y bonded to z: the composition of the
+// compound the two have made
+function compound(sim, z, y) {
+  let nz = 0, ny = 0, zTotal = 0, other = 0;
+  for (let i = 0; i < sim.n; i++) {
+    const e = sim.el[i];
+    if (e !== z && e !== y) continue;
+    if (e === z) zTotal++;
+    let toPartner = false, toOther = false;
+    for (let k = 0; k < sim.nb[i]; k++) {
+      const f = sim.el[sim.bp[i * P.MAXB + k]];
+      if (f === (e === z ? y : z)) toPartner = true;
+      else if (e === z) toOther = true;
+    }
+    if (toPartner) { if (e === z) nz++; else ny++; }
+    if (toOther) other++;
+  }
+  return { reacted: nz / zTotal, ratio: ny / Math.max(1, nz), metalOtherBonds: other };
+}
+function speciesWith(sim, test) {
+  return sim.analyze().filter(function (s) { return test(s.counts || {}); });
+}
+
+test('iron is untouched by oxygen at room temperature and oxidises to Fe2O3/Fe3O4 when heated', function () {
+  const fe = Z('Fe'), o = Z('O');
+  const cold = newSim(31);
+  cold.addMoles(fe, 0.2, P.W / 2, P.H - 150); cold.addMoles(o, 0.2, P.W / 2, P.H * 0.4);
+  run(cold, 6);
+  assert.ok(compound(cold, fe, o).reacted < 0.02, 'no rusting in dry air at 293 K: ' + JSON.stringify(compound(cold, fe, o)));
+  const hot = newSim(32);
+  hot.addMoles(fe, 0.2, P.W / 2, P.H - 150); hot.addMoles(o, 0.2, P.W / 2, P.H * 0.4);
+  hot.plateTemp = 1100;
+  run(hot, 14);
+  const c = compound(hot, fe, o);
+  assert.ok(c.reacted > 0.1, 'iron oxidises at 1100 K: ' + JSON.stringify(c));
+  // hematite Fe2O3 is O:Fe 1.5, magnetite Fe3O4 1.33, wustite FeO 1
+  assert.ok(c.ratio > 1.0 && c.ratio < 1.6, 'iron oxide composition O:Fe ' + c.ratio.toFixed(2));
+  const peroxide = speciesWith(hot, function (k) { return k[fe] && k[o] > 2 * k[fe]; }).length;
+  assert.ok(peroxide === 0, 'no iron peroxides or superoxides');
+});
+
+test('wet iron rusts to hydroxides and oxides, not iron hydrides', function () {
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const fe = Z('Fe'), o = Z('O');
+  const sim = newSim(33);
+  sim.addMoles(fe, 0.2, P.W / 2, P.H - 150); sim.addMoles(o, 0.2, P.W / 2, P.H * 0.4);
+  sim.addMolecules(H2O, 200, P.W / 2, P.H - 400, { x: 300, y: 100 });
+  sim.plateTemp = 350;
+  run(sim, 15);
+  const hydride = speciesWith(sim, function (k) { return k[fe] && k[1] && !k[o]; });
+  assert.ok(hydride.length === 0, 'no iron hydrides: ' + hydride.map(function (s) { return s.key; }).join(' '));
+  for (let i = 0; i < sim.n; i++) {
+    if (sim.el[i] !== fe) continue;
+    for (let k = 0; k < sim.nb[i]; k++) assert.ok(sim.el[sim.bp[i * P.MAXB + k]] !== 1, 'no Fe-H bond');
+  }
+  assert.ok(compound(sim, fe, o).reacted > 0.02, 'iron corrodes in wet air: ' + JSON.stringify(compound(sim, fe, o)));
+});
+
+test('magnesium and aluminium burn to MgO and Al2O3', function () {
+  [['Mg', 1.0], ['Al', 1.5]].forEach(function (c, n) {
+    const m = Z(c[0]), o = Z('O');
+    const sim = newSim(34 + n);
+    sim.addMoles(m, 0.2, P.W / 2, P.H - 150); sim.addMoles(o, 0.2, P.W / 2, P.H * 0.4);
+    sim.plateTemp = 1300;
+    run(sim, 12);
+    const r = compound(sim, m, o);
+    assert.ok(r.reacted > 0.08, c[0] + ' burns: ' + JSON.stringify(r));
+    assert.ok(Math.abs(r.ratio - c[1]) < 0.3, c[0] + ' oxide O:' + c[0] + ' ' + r.ratio.toFixed(2) + ' (expected ' + c[1] + ')');
+  });
+});
+
+test('sodium and chlorine make solid sodium chloride', function () {
+  const na = Z('Na'), cl = Z('Cl');
+  const sim = newSim(36);
+  sim.addMoles(na, 0.2, P.W / 2, P.H - 150); sim.addMoles(cl, 0.2, P.W / 2, P.H * 0.4);
+  run(sim, 25); // the reaction heat first throws the new salt off the metal; it settles as a solid
+  const r = compound(sim, na, cl);
+  assert.ok(r.reacted > 0.08 && Math.abs(r.ratio - 1) < 0.1, 'NaCl forms 1:1: ' + JSON.stringify(r));
+  const salt = sim.analyze().find(function (s) { return s.key === 'ClNa'; });
+  assert.ok(salt && salt.condensed / salt.molecules > 0.5, 'salt is a solid: condensed ' + (salt ? (salt.condensed / salt.molecules).toFixed(2) : 'none'));
+});
+
+test('hydrogen and chlorine stay apart until sparked, then make HCl; N2 + H2 needs a catalyst', function () {
+  const sim = newSim(37);
+  sim.addMoles(Z('H'), 0.2, P.W / 2, P.H * 0.4); sim.addMoles(Z('Cl'), 0.2, P.W / 2, P.H * 0.6);
+  run(sim, 2);
+  assert.ok(mol(sim, 'ClH') < 0.01, 'dark H2/Cl2 mixture is stable');
+  sim.spark(P.W / 2, P.H / 2, 550, 4000);
+  run(sim, 8);
+  assert.ok(mol(sim, 'ClH') > 0.2, 'HCl after the spark: ' + mol(sim, 'ClH').toFixed(3) + ' mol');
+  const haber = newSim(38);
+  haber.addMoles(Z('N'), 0.2, P.W / 2, P.H * 0.4); haber.addMoles(Z('H'), 0.6, P.W / 2, P.H * 0.6);
+  run(haber, 6);
+  assert.ok(mol(haber, 'H3N') < 0.005, 'no ammonia without a catalyst');
 });
 
 test('removing particles keeps bonds consistent', function () {

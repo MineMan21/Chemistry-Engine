@@ -52,6 +52,9 @@ Li-Li 105,Na-Na 74,K-K 57,Rb-Rb 49,Cs-Cs 44,Al-Cl 420,Al-O 512
     const ea = E[a], eb = E[b];
     if (ea.maxValence === 0 || eb.maxValence === 0) return 0; // noble gases (He, Ne, Ar...)
     if (ea.isMetal && eb.isMetal) return 0; // metallic bonding handled as cohesion
+    // only strongly electropositive metals form hydrides (LiH, NaH, CaH2, MgH2); iron, copper,
+    // zinc and the other transition metals do not bind hydrogen into compounds
+    if ((a === 1 && eb.isMetal && eb.en >= 1.5) || (b === 1 && ea.isMetal && ea.en >= 1.5)) return 0;
     const d = Math.abs(ea.en - eb.en);
     // a metal with a much more electronegative partner forms an ionic compound: textbook oxides,
     // halides and sulfides of the metals (MgO, Fe2O3, CuO, NaCl). Pauling's 50%-ionic gap is 1.7;

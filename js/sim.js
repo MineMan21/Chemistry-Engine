@@ -96,6 +96,7 @@
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
     LN_UNI: 16, // ln of the unimolecular attempt frequency (bond dissociation)
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
+    ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
@@ -144,6 +145,11 @@
   // out of the plane (bonds opened past ~145 degrees), and above which they are fully in plane (~110)
   let HB_FLAT_LO = 0.6, HB_FLAT_HI = 1.15;
   HB_ACCEPTOR[7] = 0.7; HB_ACCEPTOR[8] = 1.0; HB_ACCEPTOR[9] = 1.3;
+
+  // Cohesion factors of documented molecular substances, scaling their van der Waals and hydrogen-
+  // bond attraction so that each boils near its real boiling point (calibrated against the
+  // documented vapour pressures; see README). Substances not listed use 1.
+  const COHESION = {};
 
   // Per-element constants
   const mass = new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
@@ -249,6 +255,7 @@
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
+    this.coh = new Float32Array(M).fill(1); // cohesion factor of the molecule (see COHESION)
     this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
     this.grab = null; // the grab tool's hold (see grabStart)
     this.held = new Uint8Array(M); // 1 for atoms the grab tool holds
@@ -325,7 +332,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0;
     this.anneal[i] = P.ANNEAL_STEPS;
-    this.meltT[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1;
+    this.meltT[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -843,7 +850,7 @@
   // ---------------------------------------------------------------------------------------
   S.computeForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, el = this.el;
-    const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used, ion = this.ion;
+    const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used, ion = this.ion, coh = this.coh;
     const bp = this.bp, MB = P.MAXB;
     const gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
     fx.fill(0, 0, n); fy.fill(0, 0, n);
@@ -919,6 +926,7 @@
         else {
           const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
           eps = pairEps[p] * vdwScale * (1 + molPol * bi) * (1 + molPol * bj);
+          if (coh[i] !== 1 || coh[j] !== 1) eps *= coh[i] === coh[j] ? coh[i] : Math.sqrt(coh[i] * coh[j]);
         }
         F = -4 * eps * s * (1 - s * s) / w;
         if (s < 0.25) { contacts[i]++; contacts[j]++; }
@@ -938,7 +946,7 @@
       const fxp = F * dx / d, fyp = F * dy / d;
       fx[i] -= fxp; fy[i] -= fyp;
       fx[j] += fxp; fy[j] += fyp;
-      if (hbs) hbond(i, j, d, sigma, rc, hbs * hbEps);
+      if (hbs) hbond(i, j, d, sigma, rc, hbs * hbEps * (coh[i] === coh[j] ? coh[i] : Math.sqrt(coh[i] * coh[j])));
     }
 
     // Directional hydrogen bond D-H...A: strongest when the H points straight at the acceptor,
@@ -1593,6 +1601,8 @@
       const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
       eps = pairEps[p] * P.VDW_SCALE * (1 + P.MOL_POLARIZABILITY * bi) * (1 + P.MOL_POLARIZABILITY * bj);
     }
+    const cf = this.coh[i] === this.coh[j] ? this.coh[i] : Math.sqrt(this.coh[i] * this.coh[j]);
+    if (!(isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j])) eps *= cf;
     let U;
     if (d < sigma) {
       const mu = mass[ei] * mass[ej] / (mass[ei] + mass[ej]);
@@ -1601,7 +1611,7 @@
       const s = (d - sigma) / (rc - sigma);
       U = -eps * (1 - s * s) * (1 - s * s);
     }
-    if (hbs) U += this.hbondEnergy(i, j, d, sigma, rc, hbs * P.HB_EPS * P.KB);
+    if (hbs) U += this.hbondEnergy(i, j, d, sigma, rc, hbs * P.HB_EPS * P.KB * cf);
     const qq = this.q[i] * this.q[j];
     if (qq !== 0) {
       const d0 = sigma * 0.8, kc = ionic ? P.KC * P.ION_KC : P.KC;
@@ -1992,7 +2002,10 @@
         if (this.used[b] > normVal[el[b]] && !(en[el[a]] > en[el[b]] + 0.3)) continue;
         const dH = step - E1;
         const spin = this._weakSpin && isMetal[el[a]] ? P.SPIN_BARRIER : 0;
-        const Ea = P.ALPHA * step + Math.max(0, dH) + spin;
+        // alkali and alkaline-earth metals react by handing over an electron, with almost no
+        // barrier beyond the reaction enthalpy (sodium in water, potassium in air)
+        const alpha = isMetal[el[a]] && en[el[a]] < P.ET_EN ? P.ALPHA_ET : P.ALPHA;
+        const Ea = alpha * step + Math.max(0, dH) + spin;
         if (rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT)) && this.canAfford(a, b, dH)) {
           this.beginEvent(a, b, k, -1);
           this.setBond(b, k, this.bondOrder(b, k) - 1);
@@ -2151,15 +2164,31 @@
           if (!seen[b]) { seen[b] = 1; mol.push(b); }
         }
       }
-      let T = 0;
+      let T = 0, c = 1;
       if (mol.length > 1 && mol.length <= 12) {
         const counts = {};
         for (let k = 0; k < mol.length; k++) counts[el[mol[k]]] = (counts[el[mol[k]]] || 0) + 1;
         const sig = JSON.stringify(counts);
-        T = cache.get(sig);
-        if (T === undefined) { T = CE.phase.meltingPoint(C.describe(counts, mol.length, false).key); cache.set(sig, T); }
+        let e = cache.get(sig);
+        if (e === undefined) {
+          const key = C.describe(counts, mol.length, false).key;
+          const ov = Simulation.cohesionOverride;
+          e = { T: CE.phase.meltingPoint(key), c: (ov && ov[key]) || COHESION[key] || 1 };
+          cache.set(sig, e);
+        }
+        T = e.T; c = e.c;
       }
       for (let k = 0; k < mol.length; k++) meltT[mol[k]] = T;
+      if (this.coh[i] !== c) {
+        // the molecule became another substance (a reaction): its cohesion changes, and the
+        // energy that releases or costs is settled as heat
+        const set = this._cohSet || (this._cohSet = new Int32Array(12));
+        for (let k = 0; k < mol.length; k++) set[k] = mol[k];
+        const U0 = this.eventEnergy(set, mol.length);
+        for (let k = 0; k < mol.length; k++) this.coh[mol[k]] = c;
+        const dU = this.eventEnergy(set, mol.length) - U0;
+        if (dU !== 0) this.heatRaw(mol[0], mol.length > 1 ? mol[1] : mol[0], -dU);
+      }
     }
   };
 
