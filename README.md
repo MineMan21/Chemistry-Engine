@@ -177,6 +177,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - Metal cohesion is calibrated on the melting point, so metals boil in the right order but
   low-melting metals boil too early (gallium well below its real 2477 K), and a molten metal
   shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
+- Evaporation rises too gently with temperature: in an insulated jar a small amount of water is
+  about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
+  450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
+  sharp boiling point; a hot plate well above the boiling point drives them off.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

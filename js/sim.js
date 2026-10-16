@@ -38,7 +38,7 @@
     // cohesion (K per molecule) of water inside liquid or ice: -W2_EPS smoothstep over the number
     // of neighbouring water oxygens from W2_RHO_A to W2_RHO_B. A pair or a small clump in the
     // vapour gets none of it, so steam stays a gas of single molecules instead of drifting clusters
-    W2_EPS: 2000,
+    W2_EPS: 900,
     W2_RHO_A: 1.2,
     W2_RHO_B: 3.2,
     W3_RANGE: 40, // ...its range (units)...
