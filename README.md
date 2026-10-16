@@ -46,7 +46,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube; a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
+| Grab | Grab tool, then press on material and drag. Grabbing any part of a solid picks up the whole connected solid, as a hand lifts a lump of iron or an ice cube, and it keeps its shape while held (shoved into the glass it stops as a whole instead of being crushed); a liquid is held only where you grab it and the rest follows by its own cohesion, so it stretches, necks and drips; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -76,9 +76,17 @@ so the engine uses rules driven by real element data (`js/elements.js`: mass, Pa
 electronegativity, covalent radius, common valences, melting and boiling points).
 
 - **Bond type.** Two metals do not form discrete bonds; they hold together by metallic
-  cohesion (see Phases below). A metal with an electronegativity gap of at
-  least 1.7 forms ionic bonds. Everything else bonds covalently. Noble gases only bond to more
-  electronegative partners when they have valences beyond 0 (Xe, Kr, Rn).
+  cohesion (see Phases below). A metal with an electronegativity gap of at least 1.5 to its
+  partner forms ionic bonds (the oxides, halides and sulfides of the metals: MgO, Fe₂O₃, CuO,
+  NaCl). Everything else bonds covalently. Noble gases only bond to more electronegative partners
+  when they have valences beyond 0 (Xe, Kr, Rn). Only strongly electropositive metals form
+  hydrides (LiH, NaH, CaH₂, MgH₂); iron, copper and the other transition metals do not.
+- **Ionic compounds are lattices.** Each ion–ion contact carries one unit of charge, so a doubly
+  or triply charged ion bonds to several counter-ions and the compound grows as an extended
+  lattice with its textbook ratio ((MgO)n, (Al₂O₃)n, iron's Fe₂O₃ and Fe₃O₄) instead of closing
+  into small molecules. Ions touch at ionic radii (cations shrink, anions swell: Na⁺ 102 pm,
+  Cl⁻ 181 pm) and feel each other's full charges over a longer range, so salts and oxides are
+  solids.
 - **Valence.** Each element has allowed valences. Going beyond the normal one (for example
   SF₆ or PCl₅) needs a more electronegative partner.
 - **Bond energies.** Measured average bond enthalpies for about 100 common bonds (H–O 459,
@@ -90,6 +98,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   - radical + radical → bond (almost no barrier),
   - radical abstraction (a free valence steals a bond unit, e.g. Na + Cl₂ → NaCl + Cl),
   - atom transfer in hot zones (H + O₂ → OH + O), which branches flame chains,
+  - a diatomic molecule splitting across a metal surface (2 M + O₂ → 2 M–O, 2 Na + Cl₂ → 2 NaCl),
+    which is how metals oxidise: no stray O atoms or peroxides,
+  - alkali and alkaline-earth metals react by electron transfer, with almost no barrier
+    beyond the reaction enthalpy (sodium in water),
   - four-centre exchange AB + CD → AC + BD (largely forbidden, so it needs high temperature),
   - thermal dissociation of the weakest bond unit, and pi bonds forming between radicals.
 
@@ -120,6 +132,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   never as a pair or a small clump, so steam stays a gas of separate molecules rather than drifting
   droplets (in 2D, molecules meet far more often than in 3D, so pairwise stickiness alone would
   cluster the vapour).
+- **Boiling points are calibrated per substance.** The generic rules (van der Waals wells from
+  each element, hydrogen bonds, partial charges) put some substances' boiling points far off, so
+  documented molecular substances carry a cohesion factor on their van der Waals and hydrogen-
+  bond attraction: N₂, O₂, F₂, Cl₂, Br₂, I₂, CO₂, CH₄, CO, HCl, NH₃, ethanol, benzene and H₂O₂.
+  Each was bisected so that a fixed amount in the jar is half evaporated at the temperature where
+  the real substance (by its documented vapour pressure) would be. When a reaction turns a
+  molecule into another substance, the change in its attraction is settled as heat.
 - **Metallic cohesion** has two parts. A pair well scaled to the metal's melting point sets when
   the close-packed solid melts. A many-body embedding term (in the spirit of Finnis–Sinclair and
   embedded-atom models) rewards each atom for sitting inside dense metal, however that metal is
@@ -181,6 +200,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
   450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
   sharp boiling point; a hot plate well above the boiling point drives them off.
+- Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
+  (spark) → HCl, Na + Cl₂ → solid NaCl, metals burning to their oxides (MgO, Al₂O₃, iron's Fe₂O₃
+  and Fe₃O₄, CuO), wet iron corroding to hydroxides, no ammonia from N₂ + H₂ without a catalyst.
+  Still poorly reproduced: hydrocarbon flames stop at peroxides and alcohols instead of going all
+  the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled), solid
+  carbon and sulfur hardly burn, hydrogen peroxide does not decompose on heating, and sodium
+  reacts with water only at its surface and slowly.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 
