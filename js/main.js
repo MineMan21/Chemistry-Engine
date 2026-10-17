@@ -214,7 +214,9 @@
   };
   const PRESETS = {
     h2o2: { text: 'H₂ + O₂ is stable at room temperature. Use Spark (or heat the plate) to ignite it.', run: function () {
-      setPlate(293); sim.addMoles(1, 1, P.W / 2, P.H * 0.35); sim.addMoles(8, 0.5, P.W / 2, P.H * 0.65); } },
+      // premixed, as a real 2:1 mixture is (gases added in separate layers take a while to mix,
+      // and a flame cannot spread through pure hydrogen)
+      setPlate(293); sim.addMoles(1, 1, P.W / 2, P.H / 2); sim.addMoles(8, 0.5, P.W / 2, P.H / 2); } },
     nacl: { text: 'Sodium metal reacts with chlorine gas: watch Na–Cl ionic bonds and salt crystals form.', run: function () {
       setPlate(293); sim.addMoles(11, 0.5, P.W / 2, P.H * 0.85); sim.addMoles(17, 0.3, P.W / 2, P.H * 0.3); } },
     water: { text: 'A blob of liquid water dropped from mid-air: it falls, splashes into a pool and wets the glass. Heat the plate past 373 K to boil it.', run: function () {
@@ -393,8 +395,9 @@
     const w = renderer.screenToWorld(sx, sy);
     if (state.tool === 'spark' || state.tool === 'cool') {
       if (!insideJar(w[0], w[1])) return;
-      // a short burst (several frames) rather than a single instant, like a real igniter
-      state.burst = { x: w[0], y: w[1], frames: 10, hot: state.tool === 'spark' };
+      // a short burst rather than a single instant, like a real igniter
+      if (state.tool === 'spark') sim.startBurst(w[0], w[1], 550, 4000, 0.16);
+      else sim.startBurst(w[0], w[1], 260, 80, 0.16);
       if (state.tool === 'spark') renderer.addSpark(w[0], w[1]);
       return;
     }
@@ -572,11 +575,6 @@
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    if (state.burst && state.burst.frames > 0 && !state.paused) {
-      const b = state.burst;
-      sim.spark(b.x, b.y, b.hot ? 550 : 260, b.hot ? 4000 : 80);
-      if (--b.frames === 0) state.burst = null;
-    }
     if (program && sim.time >= program.until) nextStage();
     if (!state.paused && sim.n > 0) {
       // adaptive sub-stepping: spend ~9 ms per frame on physics (scaled by the speed setting)

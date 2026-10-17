@@ -17,6 +17,14 @@ Real world** buttons at the top left, or just scroll):
   liquids and solids glow: dull red from about 800 K, orange to yellow-white when molten. Clicking
   adds moles here too.
 
+Reactions give off light in every view. A reaction that makes a bond can leave the new molecule
+excited, and it sheds the excess as light (chemiluminescence). That gives a hydrogen flame its
+faint violet-blue (most of its light is ultraviolet, which is why it is hard to see in daylight),
+a hydrocarbon flame its blue, NO₂ its yellow-green and a burning metal its own colour. Hot metal
+atoms in a gas glow in their flame-test colours: sodium yellow, lithium crimson, potassium lilac,
+copper and barium green. Light fades over a fraction of a second, as a flame looks to the eye;
+on the dark theme a bright flame also lights up the room.
+
 Liquids fall under gravity, land in a pool and spread out; solids (metals below their melting
 point, salts, covalent networks) fall as lumps and keep their shape until they melt. Glass attracts polar
 molecules, so water climbs into a meniscus, thin films and drops cling to the walls, and vapour
@@ -45,7 +53,7 @@ TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 | Save a molecule | Choose **Inspect**, click any molecule in the jar, then press **Save this molecule** (or `S`). It appears under **My molecules**, kept in this browser; × deletes it |
 | Add atoms or molecules | Atom view: click in the jar (1, 5, 20 or 100 per click) |
 | Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
-| Spark | Spark tool, then click: a short 4000 K burst of heat over a small spot, like an igniter. It only heats: any bonds that break, break from that heat. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
+| Spark | Spark tool, then click: a 4000 K burst of heat over a small spot, held for a moment of simulated time (the same on a fast or slow computer), like an igniter. It only heats: any bonds that break, break from that heat. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
 | Grab | Grab tool, then press on material and drag: the hand takes hold of what is under the cursor. A solid (a lump of metal, salt, graphite or ice) is carried as a whole, its weight and the hand's push shared over all its atoms, so it is neither strained nor warmed by being moved; let go or thrown at the glass, only its own bonds hold it together. A liquid is dragged by the patch under the cursor alone, so it stretches, necks and drips; a gas slips away |
@@ -116,7 +124,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
     which is how metals oxidise: no stray O atoms or peroxides,
   - alkali and alkaline-earth metals react by electron transfer, with almost no barrier
     beyond the reaction enthalpy (sodium in water),
-  - four-centre exchange AB + CD → AC + BD (largely forbidden, so it needs high temperature),
+  - four-centre exchange AB + CD → AC + BD (symmetry forbidden; between molecules of six or
+    more atoms its barrier is high enough that stable substances such as sulfuric acid, benzene
+    or ethanol never condense or polymerise by themselves; between small ones it stands in for
+    the radical chains of H₂ + Cl₂, of a methane flame or of decomposing H₂O₂),
     and its one-bond variant AB + CD → AC + B + D, an abstraction by a molecule, with the
     abstraction barrier (it starts the dark explosion of H₂ + F₂; with Cl₂ or O₂ it is far uphill),
   - thermal dissociation of the weakest bond unit, and pi bonds forming between radicals.
@@ -234,8 +245,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   then cools to the room. About 90% of the hydrogen ends up as water: the flame dies as the gas
   cools before the last few percent of H₂ finds oxygen, leaving traces of H₂, O₂, H₂O₂ and
   radicals that meet too rarely in the sparse simulated gas to finish reacting.
-- Resonance, aromaticity, dative bonds, coordination complexes, catalysis, solvation of ions,
-  isomers with the same formula and radioactive decay are not modelled.
+- Aromaticity is modelled only as benzene-like rings (six carbon or nitrogen atoms with
+  alternating bonds), whose bonds cost an extra 150 kJ/mol to break, the ring's resonance
+  energy. Resonance in general, dative bonds, coordination complexes, catalysis, solvation of
+  ions, isomers with the same formula and radioactive decay are not modelled.
 - Superheavy elements have estimated electronegativities (from the element above them) and
   predicted or unknown melting and boiling points.
 - Metal cohesion is calibrated on the melting point, so metals boil in the right order but

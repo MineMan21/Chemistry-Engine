@@ -25,6 +25,8 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 
 | # | Issue | Status |
 | --- | --- | --- |
+| P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers | **Fixed**: see below |
+| L | Flames give off no light | **Fixed**: see below |
 | W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
@@ -73,6 +75,55 @@ rules:
   itself and melted.
 - **Bulk motion counted as heat.** Surface atoms of a moving lump, and stationary atoms
   sharing a region with it, read its speed as temperature.
+
+---
+
+## Substances reacting with themselves; light
+
+Reported issues: very reactive substances, such as sulfuric acid, reacted with themselves into
+huge polymer chains; and a hydrogen flame gave off no visible light.
+
+A survey of every molecule in the palette, alone in the jar at room temperature for 15 s:
+
+| Substance | Before | After |
+| --- | --- | --- |
+| Sulfuric acid | 99% condensed into S–O–S chains and water | 99% intact (91% at 600 K, where real sulfuric acid starts to break down) |
+| Benzene | heated itself to ~9000 K and broke into CH₄ and carbon chains | 100% intact (also at 600 K) |
+| Water, CO₂, CH₄, NH₃, CO, HCl, NaCl, NaOH, H₂O₂, ethanol | stable | stable (ethanol: 1% pairs up into an ether-like dimer) |
+
+The elements (N₂, O₂, the halogens, alkali and alkaline-earth metals) stay as they are. Sulfur,
+phosphorus, selenium, boron, silicon and carbon form networks, which their real solids are.
+Mixtures (water with sulfuric acid, NaOH, ethanol, NH₃, HCl or CO₂; ethanol or H₂O₂ with
+sulfuric acid) do not react either.
+
+Causes and fixes:
+
+- **Four-centre exchanges between whole molecules were too easy.** In the reaction AB + CD →
+  AC + BD, two stable molecules swap partners in one step. Its barrier was 22% of the bonds it
+  breaks, out of reach at room temperature but not at the brief local hot spots of a liquid's
+  surface. Real reactions of this kind are symmetry forbidden; they go through radicals, ions or
+  catalysts. Between molecules of six or more atoms the barrier is now 40%. Between two small
+  molecules it stays at 22%, because there the exchange stands in for the radical chains of
+  H₂ + Cl₂, of a methane flame or of decomposing H₂O₂, which this coarse model cannot sustain by
+  itself.
+- **Benzene had no aromatic stability.** Its "double bonds" added across like an alkene's,
+  each releasing 90 kJ/mol, and the heat ran the reaction away. Benzene-like rings are now
+  recognised, and breaking any bond of one costs the ring's 150 kJ/mol resonance energy.
+- **Light.** Reactions that make a bond now give off a flash coloured by the bond (OH violet-blue,
+  CH and C₂ blue, NO₂ yellow-green, metals their own colour), and hot metal atoms in a gas glow
+  in their flame-test colours.
+- **The spark lasts a moment of simulated time** rather than ten screen frames. On a slow
+  computer it used to be too brief to light anything once it only heated. A freshly added gas of
+  whole molecules is no longer held at room temperature while it "settles in" (meant for liquids,
+  solids and assembling networks), which had smothered flames in the first two seconds, and the
+  products of a reaction stop settling. The hydrogen/oxygen preset starts premixed.
+
+Still open:
+
+- **Benzene above ~900 K** breaks down to methane and carbon far too violently (real benzene
+  pyrolyses slowly from about 1000 K).
+- **Light is not physically calibrated:** brightness is set so a flame is clearly visible. A
+  real hydrogen flame is much fainter in a lit room.
 
 ---
 

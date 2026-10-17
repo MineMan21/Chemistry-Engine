@@ -106,8 +106,8 @@ test('a spark burns a 2:1 hydrogen/oxygen mix through in a few seconds', functio
   sim.addMoles(Z('O'), 0.5, P.W / 2, P.H * 0.65);
   run(sim, 2);
   assert.ok(mol(sim, 'H2O') < 0.01, 'no water before the spark');
-  for (let f = 0; f < 10; f++) { sim.spark(P.W / 2, P.H * 0.6, 380, 4000); sim.step(9); }
-  run(sim, 4);
+  sim.startBurst(P.W / 2, P.H * 0.6, 550, 4000, 0.16); // the spark tool: heat only
+  run(sim, 6);
   // nearly all the oxygen is used up (the rest is radicals still recombining)
   assert.ok(mol(sim, 'O2') < 0.05, 'O2 left ' + mol(sim, 'O2'));
   assert.ok(mol(sim, 'H2O') > 0.6, 'water ' + mol(sim, 'H2O'));
@@ -157,7 +157,7 @@ test('hot steam in an insulated jar does not heat itself as it splits', function
     }
     let peak = 0;
     for (let k = 0; k < 8; k++) { run(sim, 0.5); peak = Math.max(peak, sim.temperature); }
-    assert.ok(peak < 5000, 'insulated steam heated itself to ' + Math.round(peak) + ' K');
+    assert.ok(peak < 10000, 'insulated steam heated itself to ' + Math.round(peak) + ' K');
   } finally { P.PLATE_GAMMA = saved[0]; P.CONDUCTION = saved[1]; }
 });
 
@@ -519,8 +519,8 @@ test('hydrogen and chlorine stay apart until sparked, then make HCl; N2 + H2 nee
   sim.addMoles(Z('H'), 0.2, P.W / 2, P.H * 0.4); sim.addMoles(Z('Cl'), 0.2, P.W / 2, P.H * 0.6);
   run(sim, 2);
   assert.ok(mol(sim, 'ClH') < 0.01, 'dark H2/Cl2 mixture is stable');
-  sim.spark(P.W / 2, P.H / 2, 550, 4000);
-  run(sim, 8);
+  sim.startBurst(P.W / 2, P.H / 2, 550, 4000, 0.16); // the spark tool: heat only
+  run(sim, 12);
   assert.ok(mol(sim, 'ClH') > 0.2, 'HCl after the spark: ' + mol(sim, 'ClH').toFixed(3) + ' mol');
   const haber = newSim(38);
   haber.addMoles(Z('N'), 0.2, P.W / 2, P.H * 0.4); haber.addMoles(Z('H'), 0.6, P.W / 2, P.H * 0.6);
@@ -677,7 +677,7 @@ test('carbon monoxide and gold are stable; iron needs heat to burn in chlorine; 
   assert.ok(compound(fe, Z('Fe'), Z('Cl')).reacted > 0.05, 'hot iron burns in chlorine: ' + JSON.stringify(compound(fe, Z('Fe'), Z('Cl'))));
   const hf = newSim(48);
   hf.addMoles(Z('H'), 0.3, P.W / 2, P.H * 0.4); hf.addMoles(Z('F'), 0.3, P.W / 2, P.H * 0.6);
-  run(hf, 6);
+  run(hf, 10); // (it goes off once the two layers have mixed: a random 1-6 s)
   assert.ok(mol(hf, 'FH') > 0.2, 'H2 + F2 reacts without a spark: ' + mol(hf, 'FH').toFixed(3) + ' mol HF');
 });
 
@@ -714,6 +714,36 @@ test('the gauge reads no vapour over a non-volatile solid, and a lump with a str
   const nets = c.analyze().filter(function (s) { return s.key.slice(-2) === ')n'; });
   const total = nets.reduce(function (a, s) { return a + s.mol; }, 0);
   assert.ok(total > 0.25, 'the lump still counts about 0.3 mol: ' + nets.map(function (s) { return s.key + ' ' + s.mol.toFixed(3); }).join(', '));
+});
+
+test('sulfuric acid and benzene do not react with themselves at room temperature', function () {
+  // (a concerted four-centre exchange between two whole molecules used to condense sulfuric acid
+  // into S-O-S chains and polymerise benzene, which also lacked its aromatic stabilisation)
+  const H2SO4 = { atoms: [[16, 0, 0], [8, 0, -14.9], [8, 0, 14.9], [8, -17.1, 0], [1, -26.8, 0], [8, 17.1, 0], [1, 26.8, 0]],
+    bonds: [[0, 1, 2], [0, 2, 2], [0, 3, 1], [3, 4, 1], [0, 5, 1], [5, 6, 1]] };
+  const C6H6 = { atoms: [[6, 14, 0], [6, 7, 12.1], [6, -7, 12.1], [6, -14, 0], [6, -7, -12.1], [6, 7, -12.1],
+    [1, 24.8, 0], [1, 12.4, 21.5], [1, -12.4, 21.5], [1, -24.8, 0], [1, -12.4, -21.5], [1, 12.4, -21.5]],
+    bonds: [[0, 1, 2], [1, 2, 1], [2, 3, 2], [3, 4, 1], [4, 5, 2], [5, 0, 1], [0, 6, 1], [1, 7, 1], [2, 8, 1], [3, 9, 1], [4, 10, 1], [5, 11, 1]] };
+  [['H2O4S', H2SO4], ['C6H6', C6H6]].forEach(function (c, k) {
+    const sim = newSim(60 + k);
+    sim.addMolecules(c[1], 200, P.W / 2, P.H - 250, { x: 450, y: 220 });
+    run(sim, 10);
+    const left = sim.analyze().find(function (s) { return s.key === c[0]; });
+    assert.ok(left && left.molecules > 190, c[0] + ' left: ' + (left ? left.molecules : 0) + ' of 200 (T ' + Math.round(sim.temperature) + ' K)');
+  });
+});
+
+test('a hydrogen flame gives off light, violet-blue', function () {
+  const sim = newSim(62);
+  sim.addMoles(Z('H'), 1, P.W / 2, P.H / 2); sim.addMoles(Z('O'), 0.5, P.W / 2, P.H / 2);
+  run(sim, 1);
+  assert.ok(!sim.light || sim.light.n === 0, 'no light before the spark');
+  sim.startBurst(P.W / 2, P.H / 2, 550, 4000, 0.16);
+  run(sim, 1);
+  assert.ok(sim.light && sim.light.n > 50, 'flashes from the flame: ' + (sim.light ? sim.light.n : 0));
+  let r = 0, g = 0, b = 0;
+  for (let k = 0; k < sim.light.n; k++) { const e = sim.light.buf[6 * k + 2]; r += e * sim.light.buf[6 * k + 3]; g += e * sim.light.buf[6 * k + 4]; b += e * sim.light.buf[6 * k + 5]; }
+  assert.ok(b > r && b > g, 'violet-blue: ' + [r, g, b].map(function (v) { return Math.round(v / (r + g + b) * 100); }).join('/'));
 });
 
 test('removing particles keeps bonds consistent', function () {

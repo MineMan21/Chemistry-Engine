@@ -35,6 +35,8 @@
     this.imageData = null;
     this.time = 0;
     this.sparks = [];
+    this.lightCanvas = document.createElement('canvas');
+    this.lightCtx = this.lightCanvas.getContext('2d');
     this.elColorCss = E.map(function (e) { return e ? e.color : '#fff'; });
     this.elTextColor = E.map(function (e) {
       if (!e) return '#000';
@@ -117,6 +119,8 @@
       if (mix > 0) this.drawReal(ctx, mix, dt);
       if (mix > 0 && this.focus) this.drawFocusDots(ctx, mix);
     }
+
+    this.drawLight(ctx, dt);
 
     ctx.save();
     ctx.translate(this.width / 2, this.height / 2);
@@ -450,6 +454,81 @@
     glare.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = glare;
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  };
+
+  // Light: flashes of chemiluminescence from reactions (drained from the simulation) and the
+  // flame-test glow of hot metal atoms in the gas, gathered on a coarse grid that fades with a
+  // fraction of a second's afterglow (as the eye sees a flame), blurred and added over the scene.
+  // A bright flame also lights up the jar around it.
+  const LC = 40, LIGHT_TAU = 0.25;
+  R.drawLight = function (ctx, dt) {
+    const sim = this.sim, gw = Math.ceil(P.W / LC), gh = Math.ceil(P.H / LC), N = gw * gh;
+    let L = this._light;
+    if (!L || L.N !== N) {
+      L = this._light = { N: N, r: new Float32Array(N), g: new Float32Array(N), b: new Float32Array(N),
+        br: new Float32Array(N), bg: new Float32Array(N), bb: new Float32Array(N), tmp: new Float32Array(N), img: null };
+      this.lightCanvas.width = gw; this.lightCanvas.height = gh;
+      L.img = this.lightCtx.createImageData(gw, gh);
+    }
+    const fade = Math.exp(-(dt || 0.016) / LIGHT_TAU);
+    let any = false;
+    for (let c = 0; c < N; c++) { L.r[c] *= fade; L.g[c] *= fade; L.b[c] *= fade; if (L.r[c] + L.g[c] + L.b[c] > 1e-3) any = true; }
+    const cell = function (x, y) {
+      const cx = Math.min(gw - 1, Math.max(0, Math.floor(x / LC))), cy = Math.min(gh - 1, Math.max(0, Math.floor(y / LC)));
+      return cy * gw + cx;
+    };
+    // flashes from reactions (energy in kJ/mol; ~400 for a new O-H bond)
+    const fl = sim.light;
+    if (fl && fl.n) {
+      for (let k = 0; k < fl.n; k++) {
+        const o = 6 * k, c = cell(fl.buf[o], fl.buf[o + 1]), e = fl.buf[o + 2] / 4000;
+        L.r[c] += e * fl.buf[o + 3] / 255; L.g[c] += e * fl.buf[o + 4] / 255; L.b[c] += e * fl.buf[o + 5] / 255;
+      }
+      fl.n = 0; any = true;
+    }
+    // hot metal atoms in the gas: their flame-test colours, rising from ~1000 K
+    const flame = CE.Simulation.flameColor, el = sim.el, tLoc = sim.tLoc, condF = sim.condF, d = dt || 0.016;
+    for (let i = 0; i < sim.n; i++) {
+      const col = flame[el[i]];
+      if (!col || tLoc[i] < 1000 || condF[i] > 0.5) continue;
+      const t = Math.min(1, (tLoc[i] - 1000) / 1500), e = 1.2 * t * t * d, c = cell(sim.x[i], sim.y[i]);
+      L.r[c] += e * col[0] / 255; L.g[c] += e * col[1] / 255; L.b[c] += e * col[2] / 255; any = true;
+    }
+    if (!any) return;
+    // a soft copy, a few cells wide (a glow, not sparkles)
+    L.br.set(L.r); L.bg.set(L.g); L.bb.set(L.b);
+    for (const a of [L.br, L.bg, L.bb]) { boxBlur(a, gw, gh, 2, L.tmp); boxBlur(a, gw, gh, 2, L.tmp); }
+    // on a dark background light simply adds; on a light one (a lit room, where a flame is hard
+    // to see) it is drawn as a coloured haze of the same strength
+    const bgc = this.theme.bg, dark = bgc[0] !== '#' || parseInt(bgc.substr(1, 2), 16) < 128;
+    const img = L.img.data;
+    let sr = 0, sg = 0, sb = 0;
+    for (let c = 0; c < N; c++) {
+      const r = 1 - Math.exp(-L.br[c]), g = 1 - Math.exp(-L.bg[c]), b = 1 - Math.exp(-L.bb[c]), o = 4 * c;
+      if (dark) { img[o] = 255 * r; img[o + 1] = 255 * g; img[o + 2] = 255 * b; img[o + 3] = 255; }
+      else {
+        const m = Math.max(r, g, b, 1e-6);
+        img[o] = 255 * r / m; img[o + 1] = 255 * g / m; img[o + 2] = 255 * b / m; img[o + 3] = 255 * Math.min(1, 2.5 * m);
+      }
+      sr += L.r[c]; sg += L.g[c]; sb += L.b[c];
+    }
+    this.lightCtx.putImageData(L.img, 0, 0);
+    ctx.save();
+    ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+    // the flame lights up the whole jar a little
+    const tot = sr + sg + sb;
+    if (dark && tot > 0.05) {
+      const a = Math.min(0.15, tot * 0.003), m = Math.max(sr, sg, sb) || 1;
+      ctx.fillStyle = 'rgba(' + Math.round(255 * sr / m) + ',' + Math.round(255 * sg / m) + ',' + Math.round(255 * sb / m) + ',' + a.toFixed(3) + ')';
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+    ctx.translate(this.width / 2, this.height / 2);
+    ctx.scale(this.cam.scale, this.cam.scale);
+    ctx.translate(-this.cam.x, -this.cam.y);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.lightCanvas, 0, 0, gw * LC, gh * LC);
     ctx.restore();
   };
 
