@@ -595,7 +595,8 @@ test('hot hydrogen peroxide decomposes to water and oxygen, without O-O-O chains
   sim.plateTemp = 750;
   run(sim, 15);
   assert.ok(mol(sim, 'H2O') > 0.1 && mol(sim, 'O2') > 0.03, 'water and oxygen: ' + mol(sim, 'H2O').toFixed(3) + ' / ' + mol(sim, 'O2').toFixed(3));
-  const chains = speciesWith(sim, function (k) { return k[8] >= 3 && k[1]; });
+  // (HO3 is a real, short-lived radical, made from ozone; H2O3 and longer chains are not)
+  const chains = speciesWith(sim, function (k) { return k[8] >= 3 && k[1] >= 2; });
   assert.ok(chains.reduce(function (a, s) { return a + s.mol; }, 0) < 0.005, 'no polyoxides: ' + chains.map(function (s) { return s.key; }).join(' '));
 });
 

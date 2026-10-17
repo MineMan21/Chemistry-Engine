@@ -31,6 +31,7 @@ Tests run under Node (no packages needed):
 
 ```sh
 npm test
+TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 ```
 
 ## Controls
@@ -230,12 +231,18 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
   sharp boiling point; a hot plate well above the boiling point drives them off.
 - Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
-  (spark) → HCl, Na + Cl₂ → solid NaCl, metals burning to their oxides (MgO, Al₂O₃, iron's Fe₂O₃
-  and Fe₃O₄, CuO), wet iron corroding to hydroxides, no ammonia from N₂ + H₂ without a catalyst.
-  Still poorly reproduced: hydrocarbon flames stop at peroxides and alcohols instead of going all
-  the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled), solid
-  carbon and sulfur hardly burn, hydrogen peroxide does not decompose on heating, and sodium
-  reacts with water only at its surface and slowly.
+  (spark) → HCl, H₂ + F₂ exploding without a spark, Na + Cl₂ → solid NaCl, metals burning to
+  their oxides (MgO, Al₂O₃, iron's Fe₂O₃ and Fe₃O₄, CuO), iron in hot steam releasing hydrogen,
+  iron burning in chlorine only when heated, gold untouched by hot oxygen, CO stable, hot
+  hydrogen peroxide decomposing to water and oxygen, no ammonia from N₂ + H₂ without a catalyst.
+  Still poorly reproduced: hydrocarbon flames stop at peroxyacids and polymers instead of going
+  all the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled),
+  sodium reacts with water only at its surface and slowly, and with no ions in solution there is
+  no neutralisation and no NH₄Cl. Rusting at room temperature (electrochemical, over days) does
+  not happen. See `Known_Issues.md` for the full list.
+- Grabbing and throwing: metals, salts, graphite, silicon and ice come up whole; ice, sulfur and
+  oxides can still crack when thrown hard, and iodine and gallium (both close to their limits in
+  this model) fall apart. Silicon, almost fully rigid in 2D, reads too cold.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

@@ -116,6 +116,7 @@
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
+    NETWORK_O2_BARRIER: 60, // extra activation (kJ/mol) for O2 on an edge of a covalent network
     PASSIVE_BARRIER: 85, // extra activation (kJ/mol) for a halogen splitting on a metal that does not
     // react by electron transfer (iron, copper...): its own halide layer slows it at room temperature
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
@@ -2141,6 +2142,10 @@
       // an ion does not bond to its own kind (no O-O peroxide chains on an oxide, no Cl-Cl on a salt)
       if (ei === ej && (this.ion[i] || this.ion[j])) continue;
       if (ei === 8 && ej === 8 && !this.oxygenChainOK(i, j)) continue;
+      // freshly added solid or liquid still settling in (graphite assembling from added atoms, held
+      // at room temperature by a strong thermostat that its rigid bonds make it read hot) does not
+      // react with other substances yet (it still bonds within itself)
+      if (ei !== ej && (this.settling(i) || this.settling(j))) continue;
       const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
       let RT = P.R_KJ * Math.max(T, 1);
       const E1 = C.pairEnergy[p * 4 + 1];
@@ -2177,7 +2182,12 @@
         // after losing a unit, b must be able to bond with a (hypervalence rule)
         if (this.used[b] > normVal[el[b]] && !(en[el[a]] > en[el[b]] + 0.3)) continue;
         const dH = step - E1;
-        const spin = this._weakSpin && isMetal[el[a]] ? P.SPIN_BARRIER : 0;
+        // (a free valence on a solid, such as an edge of graphite or a sulfur chain, is a surface
+        // like a metal's: it meets the spin barrier too, so graphite needs heat to burn)
+        // An edge of a covalent network also has to chemisorb the oxygen: graphite oxidises with
+        // about 170 kJ/mol of activation, so it needs red heat to burn
+        const spin = this._weakSpin && (isMetal[el[a]] || this.netF[a] || this.isSolidAtom(a))
+          ? P.SPIN_BARRIER + (this.netF[a] && !isMetal[el[a]] ? P.NETWORK_O2_BARRIER : 0) : 0;
         // alkali and alkaline-earth metals react by handing over an electron, with almost no
         // barrier beyond the reaction enthalpy (sodium in water, potassium in air)
         const alpha = isMetal[el[a]] && en[el[a]] < P.ET_EN ? P.ALPHA_ET : P.ALPHA;
@@ -2277,6 +2287,16 @@
     }
     if (oN[0] + oN[1] && hetero) return false;
     return !(oN[0] && oN[1]) && oN[0] < 2 && oN[1] < 2;
+  };
+
+  S.settling = function (i) {
+    const z = this.el[i], bp = E[z].bp || 1e4;
+    // (a non-volatile element's atoms count even while knocked loose into the gas: carbon atoms
+    // flung off graphite as it assembles)
+    if (this.anneal[i] > 0 && (this.condF[i] > 0.5 || this.nb[i] >= 2 || this.netF[i] === 1 || bp > P.AMBIENT)) return true;
+    // a lone atom of a non-volatile non-metal far below its boiling point (carbon has no vapour
+    // until about 3900 K) is a stray from its lump: it may only rejoin it
+    return this.nb[i] === 0 && !isMetal[z] && bp > 600 && this.condF[i] < 0.5 && this.tCell[this.cellOfT[i]] < 0.5 * bp;
   };
 
   S.hasMetalNeighbour = function (a) {
@@ -2441,6 +2461,10 @@
     }
     this._solidIonic = ionic;
     if (n > 12 && !ionic) return 0;
+    // a fragment of a network former with free valences (C2, Si3) is a radical that bonds on into
+    // its network, not a molecular solid: no springs should hold it in place (sulfur's chains,
+    // which stand in for its S8 rings, stay a molecular solid)
+    if (!ionic) for (let k = 0; k < n; k++) if (normVal[el[mol[k]]] >= 3 && this.used[mol[k]] < normVal[el[mol[k]]]) return 0;
     const zs = Object.keys(counts);
     if (n === 3 && counts[1] === 2 && counts[8] === 1) return 0; // water: the ice crystal engine
     let g = 0;
@@ -2542,10 +2566,18 @@
       for (let a = 0; a < m; a++) { const i = set[a]; x[i] = ox[2 * a]; y[i] = ox[2 * a + 1]; }
       return false;
     }
-    // accepted: carry each atom's velocity round with it, and settle the energy change locally
+    // accepted: carry each atom's velocity round with it (about the molecule's own drift: turning
+    // the drift too would turn the motion of a moving lump into heat), and settle the energy change
+    // locally
+    let M = 0, ux = 0, uy = 0;
     for (let a = 0; a < m; a++) {
-      const i = set[a], vx = ox[2 * a] - px[i], vy = ox[2 * a + 1] - py[i];
-      px[i] = x[i] - (vx * c - vy * sn); py[i] = y[i] - (vx * sn + vy * c);
+      const i = set[a], mi = mass[el[i]];
+      M += mi; ux += mi * (ox[2 * a] - px[i]); uy += mi * (ox[2 * a + 1] - py[i]);
+    }
+    ux /= M; uy /= M;
+    for (let a = 0; a < m; a++) {
+      const i = set[a], vx = ox[2 * a] - px[i] - ux, vy = ox[2 * a + 1] - py[i] - uy;
+      px[i] = x[i] - (ux + vx * c - vy * sn); py[i] = y[i] - (uy + vx * sn + vy * c);
     }
     if (dU !== 0) this.heatRaw(set[0], set[1], -dU);
     return true;
