@@ -181,9 +181,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   a small cluster or a froth gains nothing. That is what keeps a liquid metal together far above
   its melting point; a pair well alone would boil a 2D metal almost as soon as it melted. The two
   together give each metal its real cohesive energy (iron 413 kJ/mol, lead 196, tungsten 859),
-  so pulling a lump apart costs what it costs the real metal. Iron
-  is solid at 1600 K and a liquid with almost no vapour at 2000 K, lead melts between 500 and
-  650 K, mercury is liquid at room temperature and gallium at 340 K. Melting in 2D is gradual,
+  so pulling a lump apart costs what it costs the real metal. A third, directional part makes a
+  solid metal resist shear and denting: each atom prefers its neighbours at the 60° angles of
+  the close-packed crystal (as in angular embedded-atom models; in real metals the d electrons
+  make the bonding directional), with an energy that is zero for a perfect crystal and grows as
+  bond angles are bent. A pair well and this directional term together set the melting point.
+  Iron is solid at 1650 K and a liquid with almost no vapour by about 2050 K, lead melts between
+  500 and 650 K, mercury is liquid at room temperature and gallium at 340 K. Melting in 2D is gradual,
   and gallium and mercury freeze some way below their real melting points. The pair well alone
   decides where a metal melts: the many-body term acts only on atoms being pulled out of the
   metal (a corner atom, one leaving for the vapour, the last threads of a crack), never on the
