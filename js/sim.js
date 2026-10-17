@@ -940,19 +940,30 @@
   // ---------------------------------------------------------------------------------------
   // Spatial grid
   // ---------------------------------------------------------------------------------------
+  // The cells are as wide as the short-range forces every atom feels reach; the few long-range
+  // pairs (the many-body attraction between metal atoms, Coulomb between ions) look further, over
+  // a wider ring of cells (see computeForces), so a little metal or salt in the jar does not make
+  // every water molecule check a neighbourhood four times the area its forces need. reach is the
+  // furthest any force present reaches (for searches around an atom).
   S.updateGrid = function () {
-    let maxRc = 20;
+    let shortRc = 20, longRc = 0;
     this.anyMetal = false;
     for (let a = 1; a < NZ; a++) {
       if (!this.present[a]) continue;
       if (isMetal[a]) this.anyMetal = true;
       for (let b = a; b < NZ; b++) {
         if (!this.present[b]) continue;
-        maxRc = Math.max(maxRc, pairRc[a * NZ + b], pairRhoRc[a * NZ + b]);
-        if (pairRcIon[a * NZ + b] > maxRc) maxRc = pairRcIon[a * NZ + b];
+        const p = a * NZ + b;
+        shortRc = Math.max(shortRc, pairRc[p]);
+        longRc = Math.max(longRc, pairRhoRc[p]);
+        // (Coulomb between ions only while there are ions: oxygen and hydrogen could become ions,
+        // but a jar of water has none)
+        if (this.gridIons) longRc = Math.max(longRc, pairRcIon[p]);
       }
     }
-    this.cellSize = Math.ceil(maxRc);
+    this.reach = Math.ceil(Math.max(shortRc, longRc));
+    this.cellSize = this.gridWide ? this.reach : Math.ceil(shortRc);
+    this.ring = Math.ceil(this.reach / this.cellSize);
     this.gridW = Math.ceil(P.W / this.cellSize) + 1;
     this.gridH = Math.ceil(P.H / this.cellSize) + 1;
     const cells = this.gridW * this.gridH;
@@ -960,6 +971,18 @@
   };
 
   S.buildGrid = function () {
+    // the cells must reach as far as the forces do: resize them when the first ion appears or the
+    // last one goes
+    // (and when most atoms are long-range, as in a lump of metal, one size of cell wide enough for
+    // them all is quicker than the wider ring)
+    let nIon = 0, nLong = 0;
+    for (let i = 0, ion = this.ion, nb = this.nb, el = this.el, n = this.n; i < n; i++) {
+      if (ion[i]) { nIon++; nLong++; } else if (!nb[i] && isMetal[el[i]]) nLong++;
+    }
+    const wide = this.gridWide ? nLong > 0.4 * this.n : nLong > 0.6 * this.n;
+    if (!!nIon !== !!this.gridIons || wide !== !!this.gridWide) {
+      this.gridIons = nIon > 0; this.gridWide = wide; this.updateGrid();
+    }
     const n = this.n, cs = this.cellSize, gw = this.gridW, gh = this.gridH;
     const cells = gw * gh;
     const start = this.cellStart, items = this.cellItems, cellOf = this.cellOf;
@@ -1227,6 +1250,33 @@
             if (cx > 0) for (let b = start[r - 1]; b < start[r]; b++) pair(i, items[b]);
             for (let b = start[r]; b < start[r + 1]; b++) pair(i, items[b]);
             if (cx + 1 < gw) for (let b = start[r + 1]; b < start[r + 2]; b++) pair(i, items[b]);
+          }
+        }
+      }
+    }
+    const ring = this.ring;
+    if (ring > 1) {
+      // the long-range pairs (free metal atoms with each other, ions with each other) reach past
+      // the next cell: the rest of the forward half-stencil out to the ring that covers them
+      const lr = this.lrF && this.lrF.length >= n ? this.lrF : (this.lrF = new Uint8Array(this.x.length));
+      let any = 0;
+      for (let i = 0; i < n; i++) { const f = (isMetal[el[i]] && !nb[i] ? 1 : 0) | (ion[i] ? 2 : 0); lr[i] = f; any |= f; }
+      if (any) {
+        const cellOf = this.cellOf;
+        for (let i = 0; i < n; i++) {
+          const fi = lr[i];
+          if (!fi) continue;
+          const c = cellOf[i], cx = c % gw, cy = (c - cx) / gw;
+          for (let dy = 0; dy <= ring; dy++) {
+            const yy = cy + dy;
+            if (yy >= gh) break;
+            for (let dx = dy ? -ring : 2; dx <= ring; dx++) {
+              if (dy <= 1 && dx >= -1 && dx <= 1) continue; // (already paired above)
+              const xx = cx + dx;
+              if (xx < 0 || xx >= gw) continue;
+              const c2 = yy * gw + xx;
+              for (let b = start[c2]; b < start[c2 + 1]; b++) { const j = items[b]; if (lr[j] & fi) pair(i, j); }
+            }
           }
         }
       }
@@ -1944,7 +1994,7 @@
   // Non-bonded energy of a set of atoms with everything around them (pairs inside counted once).
   S.eventEnergy = function (set, count) {
     let U = 0;
-    const self = this, r = this.cellSize;
+    const self = this, r = this.reach;
     for (let a = 0; a < count; a++) {
       const i = set[a];
       this.query(this.x[i], this.y[i], r, function (j) {
@@ -1974,7 +2024,7 @@
     if (!lam || this.nb[i]) return 0;
     const x = this.x, y = this.y, nb = this.nb;
     let S = 0, R = 0, I = 0;
-    this.query(x[i], y[i], this.cellSize, function (j) {
+    this.query(x[i], y[i], this.reach, function (j) {
       if (j === i || !isMetal[el[j]] || nb[j]) return;
       const p = ei * NZ + el[j], dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
       if (d2 >= agOut2[p]) return;
@@ -1994,7 +2044,7 @@
       const i = set[a];
       if (!isMetal[el[i]]) continue;
       if (mark[i] !== tag) { mark[i] = tag; U += this.metalAngleEnergy(i); }
-      this.query(this.x[i], this.y[i], this.cellSize, function (j) {
+      this.query(this.x[i], this.y[i], this.reach, function (j) {
         if (mark[j] === tag || !isMetal[el[j]] || nb[j]) return;
         mark[j] = tag; U += self.metalAngleEnergy(j);
       });
@@ -2009,7 +2059,7 @@
     const ei = el[i];
     if (!isMetal[ei] || nb[i]) return 0;
     let r = 0;
-    this.query(x[i], y[i], this.cellSize, function (j) {
+    this.query(x[i], y[i], this.reach, function (j) {
       if (j === i || !isMetal[el[j]] || nb[j]) return;
       if (sign && (mark[j] === tag) !== (sign > 0)) return;
       const p = ei * NZ + el[j], rc = pairRhoRc[p];
@@ -2055,7 +2105,7 @@
       const i = set[a];
       if (!isMetal[el[i]]) continue;
       U += embed(el[i], this.metalRho(i));
-      this.query(x[i], y[i], this.cellSize, function (j) {
+      this.query(x[i], y[i], this.reach, function (j) {
         if (mark[j] !== tag && listed[j] !== tag2 && isMetal[el[j]] && !nb[j]) { listed[j] = tag2; near.push(j); }
       });
     }
