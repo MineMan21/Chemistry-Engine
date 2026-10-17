@@ -8,6 +8,8 @@
 
   // ---------------------------------------------------------------------------------------
   // Bond enthalpies (kJ/mol). '-' single, '=' double, '#' triple. Average literature values.
+  // Au-O is the effective bond in gold's oxide, which is unstable: Au2O3 gives off its oxygen
+  // above about 430 K, so gold does not tarnish or burn in oxygen (Pauling's rule would give 209).
   // ---------------------------------------------------------------------------------------
   const KNOWN_BONDS = `
 H-H 436,H-C 411,H-N 386,H-O 459,H-F 565,H-Cl 428,H-Br 362,H-I 295,H-S 363,H-P 322,H-Si 318,
@@ -21,7 +23,7 @@ F-F 155,Cl-Cl 240,Br-Br 190,I-I 148,F-Cl 253,F-Br 250,F-I 271,Cl-Br 218,Cl-I 208
 S-S 226,S=S 425,P-P 201,P#P 489,Si-Si 222,B-B 293,Se-Se 172,Ge-Ge 188,As-As 146,Sn-Sn 146,
 Te-Te 126,Sb-Sb 121,Si-F 565,Si-Cl 381,S-F 284,S-Cl 255,P-F 490,P-Cl 326,P-Br 264,P-S 230,
 P=S 335,B-F 613,B-Cl 456,Xe-F 130,Kr-F 50,Rn-F 150,
-Li-Li 105,Na-Na 74,K-K 57,Rb-Rb 49,Cs-Cs 44,Al-Cl 420,Al-O 512
+Li-Li 105,Na-Na 74,K-K 57,Rb-Rb 49,Cs-Cs 44,Al-Cl 420,Al-O 512,Au-O 120
 `;
 
   // Homonuclear single-bond estimates for elements not covered above, by category.
