@@ -116,7 +116,7 @@
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
     ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
-    PASSIVE_BARRIER: 55, // extra activation (kJ/mol) for a halogen splitting on a metal that does not
+    PASSIVE_BARRIER: 85, // extra activation (kJ/mol) for a halogen splitting on a metal that does not
     // react by electron transfer (iron, copper...): its own halide layer slows it at room temperature
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
     // attack triplet O=O (why O2 is slow with fuels and metals but fast with radicals)
@@ -195,6 +195,7 @@
     OPb: 1161, HgO: 773, FeS: 1467
   };
   const SOLID_MELT_IONIC = 1200;
+  const HALOGENS = new Set([9, 17, 35, 53, 85]);
 
   // Per-element constants
   const mass =new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
@@ -559,8 +560,9 @@
     for (let i = 0; i < this.n; i++) occupy(this.x[i], this.y[i], radius[this.el[i]]);
     // triangular lattice filling the box (liquid-like packing unless a wider spacing is asked for,
     // e.g. for gases), visited in random order; when the box is full before `count` molecules are
-    // in, it grows (the caller asked for an amount, not a box)
-    for (let pass = 0; pass < 8 && added < count; pass++) {
+    // in, it grows (the caller asked for an amount, not a box), unless spread.fixed asks for the
+    // box as given (a film against the glass)
+    for (let pass = 0; pass < (spread.fixed ? 1 : 8) && added < count; pass++) {
       const grow = Math.pow(1.3, pass), sx = spread.x * grow, sy = spread.y * grow, sites = [];
       for (let j = 0; ; j++) {
         const ly = cy - sy + j * a0 * 0.866;
@@ -1367,13 +1369,16 @@
       // (motion relative to the local flow: a held body's own motion is the hand's, not heat)
       const rvx = vx - bvx, rvy = vy - bvy;
       const tInst = mass[el[i]] * (rvx * rvx + rvy * rvy) / (dt2 * 2 * P.KB);
-      const dof = Math.max(P.MIN_DOF, (2 - 0.5 * this.nb[i]) * (this.netF[i] ? P.NET_DOF : 1)), dofScale = 2 / dof;
+      // (an atom's own reading shares the bonds' constraints out more evenly: a carbon with four
+      // bonds still moves, the count only balances over the whole molecule or region)
+      const dof = Math.max(P.MIN_DOF, (2 - 0.5 * this.nb[i]) * (this.netF[i] ? P.NET_DOF : 1));
+      const dofScale = 2 / Math.max(1, 2 - 0.5 * this.nb[i]);
       let tcx = Math.floor(x[i] / P.TCELL), tcy = Math.floor(y[i] / P.TCELL);
       tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
       tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
       const tc = tcy * tgw + tcx;
       this.cellOfT[i] = tc;
-      if (contacts[i] < 2 && condF[i] <= 0.5 && !(held && held[i])) { tSumG[tc] += tInst; tCntG[tc] += 0.5 * dof; }
+      if (condF[i] <= 0.5 && !(held && held[i])) { tSumG[tc] += tInst; tCntG[tc] += 0.5 * dof; }
       else { tSum[tc] += tInst; tCnt[tc] += 0.5 * dof; }
       this.tSelf[i] += P.SELF_T_RATE * (tInst * dofScale - this.tSelf[i]);
       cellKE[tc] += tInst * P.KB;
@@ -1399,7 +1404,7 @@
             sum += tSum[c] * w; cnt += tCnt[c] * w; sumG += tSumG[c] * w; cntG += tCntG[c] * w;
           }
         }
-        const wg = cnt > 1 ? P.GAS_T_WEIGHT : 1;
+        const wg = cnt > 3 ? P.GAS_T_WEIGHT : 1;
         tNew[cy * tgw + cx] = (sum + wg * sumG + N0 * globalT) / (cnt + wg * cntG + N0);
       }
     }
@@ -1409,7 +1414,8 @@
     const ws = P.SELF_T_WEIGHT;
     for (let i = 0; i < n; i++) {
       // only in the gas phase: in dense matter the regional field is already accurate
-      const w = contacts[i] >= 2 ? 0 : ws;
+      // (and only lone atoms and molecule ends: a bonded centre's own reading is too rough)
+      const w = contacts[i] >= 2 || this.nb[i] >= 2 ? 0 : ws;
       const tc = tCell[this.cellOfT[i]];
       // at a liquid's surface one fast-jiggling molecule is not a fire; in a gas flame it may be
       const own = condF[i] > 0.3 && this.tSelf[i] > 3 * tc ? 3 * tc : this.tSelf[i];
@@ -2136,7 +2142,7 @@
       if (ei === ej && (this.ion[i] || this.ion[j])) continue;
       if (ei === 8 && ej === 8 && !this.oxygenChainOK(i, j)) continue;
       const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
-      const RT = P.R_KJ * Math.max(T, 1);
+      let RT = P.R_KJ * Math.max(T, 1);
       const E1 = C.pairEnergy[p * 4 + 1];
       const canI = this.canAccept(i, ej) && !this.loneC(i), canJ = this.canAccept(j, ei) && !this.loneC(j);
       if (canI && canJ) {
@@ -2153,6 +2159,10 @@
       if (canI !== canJ) {
         // radical abstraction: a free valence on one atom steals a bond unit from the other
         const a = canI ? i : j, b = canI ? j : i; // a has free valence, b must give one up
+        // on the surface of a lump of metal the rate goes with the surface's temperature (the
+        // average one already holds the fast tail of the gas; a fast molecule's own reading on top
+        // would count that tail twice)
+        if (isMetal[el[a]] && this.condF[a] > 0.5) RT = P.R_KJ * Math.max(this.tLoc[a], 1);
         if (isMetal[el[a]]) {
           if (this.dissociativeAdsorption(a, b, RT)) continue;
           // a metal surface does not half-open O2 or Cl2 into a peroxide or superoxide (M-O-O.) or
@@ -2171,7 +2181,9 @@
         // alkali and alkaline-earth metals react by handing over an electron, with almost no
         // barrier beyond the reaction enthalpy (sodium in water, potassium in air)
         const alpha = isMetal[el[a]] && en[el[a]] < P.ET_EN ? P.ALPHA_ET : P.ALPHA;
-        const Ea = alpha * step + Math.max(0, dH) + spin;
+        // (and other metals meet the same halide-layer barrier as in dissociativeAdsorption)
+        const passive = isMetal[el[a]] && en[el[a]] >= P.ET_EN && HALOGENS.has(el[b]) ? P.PASSIVE_BARRIER : 0;
+        const Ea = alpha * step + Math.max(0, dH) + spin + passive;
         if (rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT)) && this.canAfford(a, b, dH)) {
           this.beginEvent(a, b, k, -1);
           this.setBond(b, k, this.bondOrder(b, k) - 1);
@@ -2215,7 +2227,8 @@
         const pkl = el[k] * NZ + el[l];
         const dx = this.x[l] - this.x[k], dy = this.y[l] - this.y[k];
         const near = dx * dx + dy * dy < 2.25 * pairSigma[pkl] * pairSigma[pkl];
-        if (C.pairClass[pkl] && near) { formSum += C.pairEnergy[pkl * 4 + 1]; formKL = true; }
+        const ooOK = !(el[k] === 8 && el[l] === 8) || this.oxygenChainOK(k, l, i, j);
+        if (C.pairClass[pkl] && near && ooOK) { formSum += C.pairEnergy[pkl * 4 + 1]; formKL = true; }
       }
       const dH = breakSum - formSum;
       // AB + CD -> AC + B. + D. makes one bond and two radicals: an abstraction by a molecule, with
@@ -2247,14 +2260,23 @@
 
   // May oxygens i and j bond? Not into an O-O-O chain on a molecule that holds other elements:
   // H2O3 and longer polyoxides (and organic HOOO- groups) fall apart far below room temperature,
-  // so OH + H2O2 does not grow H2O3. Pure oxygen may: O + O2 -> O3 (ozone).
-  S.oxygenChainOK = function (i, j) {
+  // so OH + H2O2 does not grow H2O3. Pure oxygen may, as far as ozone: O + O2 -> O3, but not
+  // O2 + O2 -> O4.
+  // (si, sj: partners i and j are losing in the same step, not counted)
+  S.oxygenChainOK = function (i, j, si, sj) {
     const MB = P.MAXB, el = this.el;
-    let oChain = false, hetero = false;
-    for (const a of [i, j]) for (let k = 0; k < this.nb[a]; k++) {
-      if (el[this.bp[a * MB + k]] === 8) oChain = true; else hetero = true;
+    let hetero = false;
+    const oN = [0, 0];
+    for (let t = 0; t < 2; t++) {
+      const a = t ? j : i;
+      for (let k = 0; k < this.nb[a]; k++) {
+        const b = this.bp[a * MB + k];
+        if (b === (t ? sj : si)) continue;
+        if (el[b] === 8) oN[t]++; else hetero = true;
+      }
     }
-    return !(oChain && hetero);
+    if (oN[0] + oN[1] && hetero) return false;
+    return !(oN[0] && oN[1]) && oN[0] < 2 && oN[1] < 2;
   };
 
   S.hasMetalNeighbour = function (a) {
@@ -2711,7 +2733,7 @@
     for (let gi = 0; gi < grains.length; gi++) {
       const g = grains[gi];
       if (g.kind === 1 || !g.mem.length) continue;
-      const r = g.a * 1.25;
+      const r = g.a * (g.kind === 3 ? 1.6 : 1.25);
       for (const u of g.mem) {
         const i = u.atoms[0];
         this.query(x[i], y[i], r, function (j) {
@@ -2945,11 +2967,12 @@
     const was = this._wasHeld || (this._wasHeld = new Uint8Array(P.MAX));
     was.set(held.subarray(0, this.n));
     held.fill(0);
-    // an atom already in the lump stays in it unless it has itself melted: the vapour the lump
-    // stirs up as it moves can read hot around it, but that does not melt a solid
+    // part of the lump: solid, or packed against it and below its melting point by its own
+    // temperature (the vapour a moving lump stirs up can make the region around it read hot, but
+    // that does not melt a solid); an atom already held needs only the temperature
     const solid = function (i) {
       if (self.isSolidAtom(i)) return true;
-      if (!was[i]) return false;
+      if (!was[i] && self.condF[i] <= 0.5) return false;
       const T = self.tSelf[i], z = el[i];
       if (isMetal[z] && self.nb[i] === 0) return T < meltK[z];
       const m = self.solidT[i] || self.meltT[i];
@@ -2958,9 +2981,13 @@
     this.buildGrid();
     const add = function (i) { if (!held[i]) { held[i] = 1; body.push(i); } };
     for (const i of g.patch) add(i);
+    const grains = new Uint8Array(this.grains.length);
     for (let h = 0; h < body.length; h++) {
       const a = body[h];
       for (let k = 0; k < this.nb[a]; k++) add(this.bp[a * MB + k]);
+      // a crystal grain comes along whole
+      const gi = this.grainOf[a];
+      if (gi >= 0 && !grains[gi]) { grains[gi] = 1; for (const u of this.grains[gi].mem) for (const i of u.atoms) add(i); }
       // the patch itself reaches into the lump even where its surface is loose
       if (h >= g.patch.length && !solid(a)) continue;
       this.query(x[a], y[a], 1.3 * (radius[el[a]] + P.SOLID_A / 2), function (j) {
