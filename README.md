@@ -45,7 +45,7 @@ TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 | Save a molecule | Choose **Inspect**, click any molecule in the jar, then press **Save this molecule** (or `S`). It appears under **My molecules**, kept in this browser; × deletes it |
 | Add atoms or molecules | Atom view: click in the jar (1, 5, 20 or 100 per click) |
 | Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
-| Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
+| Spark | Spark tool, then click: a short 4000 K burst of heat over a small spot, like an igniter. It only heats: any bonds that break, break from that heat. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
 | Grab | Grab tool, then press on material and drag: the hand takes hold of what is under the cursor. A solid (a lump of metal, salt, graphite or ice) is carried as a whole, its weight and the hand's push shared over all its atoms, so it is neither strained nor warmed by being moved; let go or thrown at the glass, only its own bonds hold it together. A liquid is dragged by the patch under the cursor alone, so it stretches, necks and drips; a gas slips away |
@@ -230,8 +230,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - Each particle is a statistical stand-in for 1 mmol, and every simulated collision represents
   many real ones (folded into the Arrhenius prefactor), so time is compressed and reaction
   speeds are qualitative. A sparked 2:1 H₂/O₂ mixture burns through in a second or two
-  (a real one explodes in milliseconds); the flame peaks around 4000–5000 K, hotter than the
-  real ~3000 K because 2D molecules have fewer ways to store the heat, then cools to the room.
+  (a real one explodes in milliseconds); the flame peaks around 3000 K, as a real one does, and
+  then cools to the room. About 90% of the hydrogen ends up as water: the flame dies as the gas
+  cools before the last few percent of H₂ finds oxygen, leaving traces of H₂, O₂, H₂O₂ and
+  radicals that meet too rarely in the sparse simulated gas to finish reacting.
 - Resonance, aromaticity, dative bonds, coordination complexes, catalysis, solvation of ions,
   isomers with the same formula and radioactive decay are not modelled.
 - Superheavy elements have estimated electronegativities (from the element above them) and
