@@ -527,6 +527,19 @@
     $('ro-press').textContent = (p > 0 && p < 0.01 ? p.toExponential(1) : p < 100 ? p.toFixed(2) : p.toFixed(0)) + ' atm';
     $('ro-atoms').textContent = sim.n.toLocaleString();
     $('ro-rx').textContent = Math.round(sim.reactionsPerSec).toLocaleString() + '/s';
+    // how much slower than real life the jar runs on screen: atoms' motion, and the reactions
+    // (which the engine already speeds up relative to the motion)
+    const rate = state.paused ? 0 : state.simRate, real = CE.Simulation.realSecondsPerSimSecond();
+    $('ro-slow-motion').textContent = rate > 0 ? slower(1 / (rate * real.motion)) : 'paused';
+    $('ro-slow-chem').textContent = rate > 0 ? slower(1 / (rate * real.chemistry)) : 'paused';
+  }
+  // "1.6×10¹¹× slower", "160× slower" (or faster)
+  function slower(f) {
+    if (f < 1) return (1 / f < 10 ? (1 / f).toFixed(1) : Math.round(1 / f).toLocaleString()) + '× faster';
+    if (f < 1e4) return (f < 10 ? f.toFixed(1) : Math.round(f).toLocaleString()) + '× slower';
+    const e = Math.floor(Math.log10(f)), m = f / Math.pow(10, e);
+    const sup = String(e).split('').map(function (d) { return '⁰¹²³⁴⁵⁶⁷⁸⁹'[+d]; }).join('');
+    return m.toFixed(1) + '×10' + sup + '× slower';
   }
 
   function updateInspector() {
@@ -571,6 +584,8 @@
       const subs = Math.max(1, Math.min(24, Math.floor(budget / Math.max(0.05, state.msPerSub))));
       const t0 = performance.now();
       sim.step(subs);
+      // simulated seconds per real second, smoothed
+      state.simRate = (state.simRate || 0) * 0.95 + 0.05 * subs * CE.Simulation.params.DT / Math.max(dt, 1e-3);
       const per = (performance.now() - t0) / subs;
       state.msPerSub = state.msPerSub * 0.9 + per * 0.1;
     } else if (!state.paused) {
