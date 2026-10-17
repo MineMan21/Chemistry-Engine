@@ -67,7 +67,19 @@ the plate control takes over from the program.
 The simulated jar is a 24 × 32 nm slice, and each particle statistically stands for **1 mmol** of atoms
 (6.0 × 10²⁰), so **1 mol = 1000 particles**. That is what lets you add moles at a time and still
 run in real time. The jar is treated as 24 L, so 1 mol of gas at room temperature reads about
-1 atm on the gauge. The real-world view draws that sample as a jar 24 cm wide (its scale bar is
+1 atm on the gauge.
+
+Time is slowed down too, by a different amount for motion and for chemistry, and the jar's
+readouts show both live, for the speed the simulation is actually running at:
+
+- **Motion.** Atoms move at their real thermal speeds scaled down so that a simulated second is
+  about 4 picoseconds of real atomic motion, about 10¹¹ times slower than real life at normal
+  speed.
+- **Chemistry.** Reactions are sped up relative to the motion: each contact between two atoms
+  stands for about e¹⁸ (7 × 10⁷) real collisions. A simulated second is then a few milliseconds
+  of real chemistry, so a flame or a reaction runs a few hundred times slower than the real one.
+
+The real-world view draws that sample as a jar 24 cm wide (its scale bar is
 in cm), while the atom and mole views show nm and Å. Diatomic elements (H, N, O, F, Cl, Br, I) are added as X₂ by default, so
 "1 mol of hydrogen" means 1 mol of H₂.
 
@@ -202,7 +214,11 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
   a strong settling force only to material that is clearly packed (liquids and solids); gas
   molecules feel almost none, so vapour still fills the jar. What the hand holds feels none:
-  the hand carries its weight. The glass walls and floor attract
+  the hand carries its weight. Heat exchange with the plate, the glass and the air is not
+  friction: liquids and solids exchange heat about their own flow, so nothing brakes a falling
+  or thrown lump before it lands; only what touches the glass or the floor is held back by it.
+  The settling force is far stronger than real gravity, so a lump dropped from the top of the jar
+  lands fast enough to flash hot for a moment. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.

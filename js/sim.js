@@ -367,6 +367,17 @@
   const S = Simulation.prototype;
   Simulation.params = P;
   Simulation.buildTables = buildTables;
+  // How much real time one simulated second stands for.
+  // Motion: atoms move at their real thermal speeds scaled down by sqrt(KB / (k_B/u)), in jar
+  // units of 10 pm, so a simulated second is about 4 ps of real atomic motion.
+  // Chemistry: each contact-step of DT_REF stands for e^LN_COLL real collisions, and a pair in
+  // contact really tries to react about 10^13 times a second (a bond vibration), so reactions
+  // get through far more real time per simulated second than the motion does.
+  Simulation.realSecondsPerSimSecond = function () {
+    const motion = 1e-11 * Math.sqrt(P.KB / 8314.46);
+    const chemistry = Math.exp(P.LN_COLL) / (P.DT_REF * 1e13);
+    return { motion: motion, chemistry: chemistry };
+  };
   Simulation.ENERGY_PER_KJ = ENERGY_PER_KJ;
   Simulation.elColor = elColor;
   Simulation.packColor = packColor;
@@ -1355,11 +1366,15 @@
         const c1 = Math.exp(-gamma * dt);
         const sd = Math.sqrt((1 - c1 * c1) * P.KB * Tw * im) * dt;
         // cheap unit-variance noise (sum of 3 uniforms); exact Gaussians are not needed here
-        // a held body is thermostatted about its own motion: heat exchange is not friction, so
-        // the plate, glass or air does not anchor what the hand is lifting (dragging the rest
-        // of a lump against the patch in the hand would strain and heat it)
-        const hvx = held ? (held[i] ? grab.vx : this.carried[i] ? grab.bvx : 0) : 0;
-        const hvy = held ? (held[i] ? grab.vy : this.carried[i] ? grab.bvy : 0) : 0;
+        // Heat exchange is not friction: liquids and solids are thermostatted about their own
+        // local flow, so the air and the plate's warmth do not brake a falling or thrown lump
+        // before it lands, nor anchor what the hand is lifting (dragging the rest of a lump
+        // against the patch in the hand would strain and heat it). Only what actually touches
+        // the glass or the floor feels it as friction.
+        let hvx = 0, hvy = 0;
+        if (held && held[i]) { hvx = grab.vx; hvy = grab.vy; }
+        else if (held && this.carried[i]) { hvx = grab.bvx; hvy = grab.bvy; }
+        else if (noise >= 0 && !adhered && y[i] < H - rw - P.WALL_ADH_RANGE) { hvx = bvx; hvy = bvy; }
         vx = hvx + (vx - hvx) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
         vy = hvy + (vy - hvy) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
       }

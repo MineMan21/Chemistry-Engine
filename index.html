@@ -31,6 +31,8 @@
         <div><span class="label">Pressure</span><span id="ro-press">0.00 atm</span></div>
         <div><span class="label">Atoms</span><span id="ro-atoms">0</span></div>
         <div><span class="label">Reactions</span><span id="ro-rx">0/s</span></div>
+        <div><span class="label">Motion</span><span id="ro-slow-motion">–</span></div>
+        <div><span class="label">Chemistry</span><span id="ro-slow-chem">–</span></div>
       </div>
       <div id="inspector" hidden></div>
       <button id="save-pinned" class="btn primary" hidden>Save this molecule</button>
@@ -110,7 +112,7 @@
         <div id="add-moles" class="add-mode">
           <p class="mode-title">Bulk view: add by the mole</p>
           <div class="row">
-            <input id="mol-amount" type="number" min="0.01" max="20" step="0.1" value="1" aria-label="Moles">
+            <input id="mol-amount" type="number" min="0.1" max="20" step="0.1" value="1" aria-label="Moles">
             <span class="label">mol</span>
             <button id="add-btn" class="btn primary">Add</button>
           </div>

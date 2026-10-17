@@ -109,7 +109,11 @@ What changed:
   many-body embedding term, which makes an atom inside dense metal more tightly bound than one
   at a surface, crack or cluster. Metal crystals no longer have template springs: springs to a
   lattice template are not forces between atoms, and they leaked energy as the template refit.
-  Nothing slows atoms near the glass or the floor any more.
+  Nothing slows atoms near the glass or the floor any more, and the heat exchange with the
+  plate, glass and air works relative to the material's own flow, so it no longer acts as a
+  drag that slowed falling lumps, most of all just above the hot plate. Only atoms that touch
+  the glass or floor feel friction. A lump dropped from the top of the jar now lands at full
+  speed, flashes hot for a moment (iron about 1200 K) and cools on the plate within a second.
 - **Metal melting points come from the pair well alone.** Without the springs, the pair well was
   recalibrated so that iron is solid at 1600 K and liquid at 2000 K, and lead melts between 500
   and 650 K. The many-body term only acts on atoms being pulled out of the metal, so it cannot
