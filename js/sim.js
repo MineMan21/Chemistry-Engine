@@ -766,7 +766,7 @@
     const rest = C.pairLength[(this.el[i] * NZ + this.el[j]) * 4 + order];
     // starts at the atoms' current distance (also when they overlap) and eases to its rest
     // length kinematically; snapping it there in one step would fling the atoms apart
-    const len = Math.min(Math.max(Math.sqrt(dx * dx + dy * dy), rest * 0.4), rest * 2.5);
+    const len = Math.max(Math.sqrt(dx * dx + dy * dy), rest * 0.4);
     let k = this.nb[i]++;
     this.bp[i * MB + k] = j; this.bo[i * MB + k] = order; this.bc[i * MB + k] = cls; this.bl[i * MB + k] = len;
     k = this.nb[j]++;
@@ -2163,6 +2163,15 @@
     for (let c = 0; c < this.nCand; c++) {
       const i = this.candI[c], j = this.candJ[c];
       if (i >= this.n || j >= this.n || this.isBonded(i, j)) continue;
+      // the pair must still be in contact: candidates were collected before this substep's motion
+      // and events, and a fast atom (a hot H) may have moved on; bonding it from afar would
+      // snap it back across the gap and fling it off with energy from nowhere
+      {
+        const pp = el[i] * NZ + el[j], sg = pairSigma[pp];
+        const s = 1.05 * (sg + P.RADICAL_CAPTURE * (pairRc[pp] - sg)); // (radicals react a little before contact)
+        const dx = this.x[j] - this.x[i], dy = this.y[j] - this.y[i];
+        if (dx * dx + dy * dy > s * s) continue;
+      }
       // candidates were collected before this substep's events; never close a 3-membered ring
       if (this.nb[i] && this.nb[j] && this.isOneThree(i, j)) continue;
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
@@ -2890,9 +2899,12 @@
       for (let k = 0; k < this.nb[i]; k++) {
         const j = this.bp[i * MB + k];
         if (j < i) continue;
+        // (stretched far beyond what the bond is holding it at: a bond just made between atoms a
+        // little apart starts at their distance and eases in, it is not stretched)
         const rest = C.pairLength[(el[i] * NZ + el[j]) * 4 + this.bo[i * MB + k]];
+        const lim = Math.max(3 * rest, 1.5 * this.bl[i * MB + k]);
         const dx = x[j] - x[i], dy = y[j] - y[i];
-        if (dx * dx + dy * dy > 9 * rest * rest) {
+        if (dx * dx + dy * dy > lim * lim) {
           // the bond is broken, so its energy is paid from the surroundings like a dissociation
           const be = C.bondEnergy(el[i], el[j], this.bo[i * MB + k]);
           this.setBond(i, j, 0);
@@ -3182,8 +3194,10 @@
 
   // Local heating/cooling tool (spark igniter / cold finger). A hot spark also splits some bonds
   // in its path, creating the radicals that start chain reactions (as a real spark does).
+  // Spark (and Chill): heats (or cools) a spot to T, nothing more. A real spark ignites a mixture
+  // only by heating it; any bonds broken are broken by that heat, through the usual kinetics.
   S.spark = function (x, y, r, T) {
-    const self = this, MB = P.MAXB;
+    const self = this;
     this.buildGrid();
     const hit = [];
     this.query(x, y, r, function (j) { hit.push(j); });
@@ -3193,20 +3207,6 @@
       self.px[j] = self.x[j] - gaussian(self.rng) * sd;
       self.py[j] = self.y[j] - gaussian(self.rng) * sd;
       self.tLoc[j] = T; self.tSelf[j] = T;
-    }
-    if (T > 1500) {
-      for (let k = 0; k < hit.length; k++) {
-        const i = hit[k];
-        for (let b = 0; b < this.nb[i]; b++) {
-          const j = this.bp[i * MB + b];
-          if (j < i || this.rng() > 0.5) continue;
-          const order = this.bo[i * MB + b];
-          if (C.stepEnergy(this.el[i], this.el[j], order) > 700) continue;
-          this.setBond(i, j, order - 1);
-          this.logReaction();
-          b--;
-        }
-      }
     }
     // heat the local temperature field as well
     const c0 = Math.max(0, Math.floor((x - r) / P.TCELL)), c1 = Math.min(this.tgw - 1, Math.floor((x + r) / P.TCELL));

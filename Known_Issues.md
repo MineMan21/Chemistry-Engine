@@ -25,6 +25,7 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 
 | # | Issue | Status |
 | --- | --- | --- |
+| W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
@@ -72,6 +73,45 @@ rules:
   itself and melted.
 - **Bulk motion counted as heat.** Surface atoms of a moving lump, and stationary atoms
   sharing a region with it, read its speed as temperature.
+
+---
+
+## Hydrogen flame, sparked water and heated water
+
+Reported issue: a 2:1 H₂/O₂ mix burned to "a bunch of junk" rather than water, sparking water
+split it into other molecules, and heating water made new molecules.
+
+Causes and fixes:
+
+- **Bonds formed from a distance snapped shut.** A reaction candidate is picked when two atoms
+  touch, but a fast hot H atom can have moved on by the time the reaction fires. The new bond
+  started at most 2.5× its rest length, so the constraint solver yanked the atoms across the gap
+  in one step and flung them off with energy from nowhere. In an insulated jar, steam at about
+  2000 K heated itself to 19,000 K. Reactions now need the pair to still be in contact. A new
+  bond starts at the atoms' real distance and eases in.
+- **Stretched-bond check broke bonds that were easing in.** It snapped any bond longer than 3×
+  its rest length, including ones just made a little apart. Each snap charged the bond's full
+  energy, and the atoms bonded again, around and around. The energy owed piled up to the whole
+  heat of the flame, which kept the flame cool and then chilled the jar below room
+  temperature. It now judges stretch against the length the bond is easing from.
+- **The spark only heats.** It used to break bonds directly as well.
+
+Results:
+
+| Experiment | Before | After |
+| --- | --- | --- |
+| Sparked 2:1 H₂/O₂ | peaked ~11,000 K, still ~6000 K after 40 s; 81% water with H, OH, O, H₂O₂, HO₂ | peaks ~3000 K, back to ~300 K; ~91% water, rest mostly H₂ with traces of O₂, H₂O₂, OH |
+| Water on a 3000 K plate, then cooled | steam reached 7200 K and stayed above 4000 K after cooling | steam reaches ~1900 K with ~3% split into H and OH; ~2% left as H and OH after cooling |
+| Sparked water | ~10% split into H, OH, H₂O₂, HO₂ | ~6% split, ending mostly as H₂ with traces of O₂ and H₂O₂ (as flash-heated water really does) |
+
+Real water stays water up to about 2000 K. It splits by about a tenth near 3000 K and much more
+near 4000 K, into H₂, O₂, OH, H and O, and those recombine to water on cooling.
+
+Still open:
+
+- **A few radicals linger:** in the sparse simulated gas, stray H atoms and OH meet too rarely
+  to finish recombining, so 1–2% stay unreacted at room temperature. Real ones would also
+  recombine on the glass.
 
 ---
 
@@ -152,7 +192,7 @@ Still open:
 
 | Preset | Real world | What the sandbox does (after the fix pass) | Verdict |
 | --- | --- | --- | --- |
-| Hydrogen + oxygen (spark) | Explodes to water | Burns to water. Flame peaks around 4900 K (real ~3000 K) **(README)** | Good |
+| Hydrogen + oxygen (spark) | Explodes to water | Burns to about 90% water. Flame peaks around 3000 K (real ~3000 K) **(README)** | Good |
 | Sodium + chlorine | Vigorous reaction, white NaCl smoke | Correct product; ~25% of the sodium reacted after 20 s | Partial |
 | Drop a blob of water | Falls, pools, wets the glass | Falls, pools, wets the glass; now gets the full 1.4 mol | Good |
 | Steam on cold glass (450 K plate) | Water boils off and condenses on the walls | Still nearly all liquid after 30 s **(README)** | Poor |

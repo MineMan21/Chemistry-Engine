@@ -140,6 +140,27 @@ test('water is liquid at 300 K and boils away on a hot plate', function () {
   assert.ok(hot < cold - 0.2, 'liquid fraction at 520 K ' + hot);
 });
 
+test('hot steam in an insulated jar does not heat itself as it splits', function () {
+  // Splitting water takes heat (and re-forming it gives the same back), so steam kicked hot and
+  // left alone in an insulated jar cannot run away. (Bonds made between atoms a little apart
+  // used to snap shut and fling the atoms off, and the steam ran away to ~19,000 K.)
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const sim = newSim(3);
+  sim.addMolecules(H2O, 400, P.W / 2, P.H / 2, { x: 1000, y: 1400 });
+  run(sim, 2);
+  const saved = [P.PLATE_GAMMA, P.CONDUCTION];
+  sim.insulated = true; sim.convection = 0; P.PLATE_GAMMA = 0; P.CONDUCTION = 0;
+  try {
+    for (let i = 0; i < sim.n; i++) {
+      const sd = Math.sqrt(P.KB * 6000 / CE.elements[sim.el[i]].mass) * P.DT;
+      sim.px[i] = sim.x[i] - (sim.rng() - 0.5) * 3.46 * sd; sim.py[i] = sim.y[i] - (sim.rng() - 0.5) * 3.46 * sd;
+    }
+    let peak = 0;
+    for (let k = 0; k < 8; k++) { run(sim, 0.5); peak = Math.max(peak, sim.temperature); }
+    assert.ok(peak < 5000, 'insulated steam heated itself to ' + Math.round(peak) + ' K');
+  } finally { P.PLATE_GAMMA = saved[0]; P.CONDUCTION = saved[1]; }
+});
+
 test('liquid water falls under gravity and wets the glass', function () {
   const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
   const sim = newSim(10);
