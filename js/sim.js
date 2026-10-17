@@ -145,7 +145,8 @@
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
     VALVE_HALF: 140,
     PUMP_RATE: 0.7, // vacuum pump: fraction of the gas removed per simulated second // half-width of the valve opening in the lid
-    MAX_STEP: 6, // max displacement per substep (keeps the integrator stable)
+    MAX_STEP: 6, // max displacement per substep (keeps the integrator stable; a limit per substep
+    // whatever DT is: clipping bonded atoms harder pumps energy into stiff networks such as graphite)
     TCELL: 160, // size of the coarse cells used for the local temperature field
     T_PRIOR: 2,
     SELF_T_RATE: 0.02, // EMA rate of an atom's own kinetic temperature (per substep)
@@ -1194,7 +1195,7 @@
   // ---------------------------------------------------------------------------------------
   S.integrate = function () {
     const n = this.n, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
-    const dt = P.DT, dt2 = dt * dt, sub = dt / P.DT_REF, maxS = P.MAX_STEP * sub;
+    const dt = P.DT, dt2 = dt * dt, sub = dt / P.DT_REF, maxS = P.MAX_STEP;
     const condRate = perSub(0.04), gEase = perSub(P.G_EASE), selfRate = perSub(P.SELF_T_RATE);
     const contacts = this.contacts;
     const tgw = this.tgw, tgh = this.tgh, tSum = this.tSum, tCnt = this.tCnt, tCell = this.tCell;
