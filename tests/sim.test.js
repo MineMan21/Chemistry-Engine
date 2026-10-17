@@ -304,7 +304,8 @@ test('gallium melts just above its 303 K melting point and freezes below it', fu
   sim.plateTemp = 240;
   run(sim, 12);
   const frozen = metalState(sim, ga);
-  assert.ok(frozen.crystal > 0.6, 'gallium freezes at 240 K: ' + JSON.stringify(frozen));
+  // (metal grains only record order: a frozen lump is close-packed, most of it in grains)
+  assert.ok(frozen.psi6 > 0.85 && frozen.crystal > 0.5, 'gallium freezes at 240 K: ' + JSON.stringify(frozen));
 });
 
 test('mercury is a liquid at room temperature', function () {
@@ -506,8 +507,8 @@ function liftAndThrow(seed, setup) {
   lump.forEach(function (i) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / lump.length; });
   const y0 = lump.map(function (i) { return sim.y[i]; });
   sim.grabStart(cx, top + 20, 120);
-  let steps = Math.round(1.5 / P.DT);
-  for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 20 - 700 * Math.min(1, s / (0.75 * steps))); sim.step(6); }
+  let steps = Math.round(3 / P.DT);
+  for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 20 - 700 * Math.min(1, s / (0.67 * steps))); sim.step(6); }
   let rose = 0;
   lump.forEach(function (i, k) { if (sim.y[i] < y0[k] - 500) rose++; });
   steps = Math.round(0.4 / P.DT);
@@ -537,13 +538,72 @@ test('lumps of lead and graphite come up whole when grabbed and survive a throw'
   assert.ok(graphite.rose > 0.85 && graphite.piece > 0.85, 'graphite: ' + JSON.stringify(graphite));
 });
 
+test('holding and moving a lump does not warm it, and iron thrown at the glass stays whole', function () {
+  // internal temperature of a set of atoms: motion relative to their own centre of mass
+  function Tint(sim, set) {
+    let vx = 0, vy = 0;
+    set.forEach(function (i) { vx += sim.x[i] - sim.px[i]; vy += sim.y[i] - sim.py[i]; });
+    vx /= set.length; vy /= set.length;
+    let ke = 0;
+    set.forEach(function (i) {
+      const ux = sim.x[i] - sim.px[i] - vx, uy = sim.y[i] - sim.py[i] - vy;
+      ke += 0.5 * CE.elements[sim.el[i]].mass * (ux * ux + uy * uy) / (P.DT * P.DT);
+    });
+    return ke / (set.length * P.KB);
+  }
+  function avgT(sim, set, seconds, move) {
+    const steps = Math.round(seconds / P.DT);
+    let T = 0, c = 0;
+    for (let s = 0; s < steps; s += 6) { if (move) move(s / steps); sim.step(6); if (s % 60 === 0) { T += Tint(sim, set); c++; } }
+    return T / c;
+  }
+  ['Fe', 'Au'].forEach(function (sym, k) {
+    const sim = newSim(50 + k);
+    sim.addMoles(Z(sym), 0.3, P.W / 2, P.H - 150);
+    run(sim, 6);
+    const saved = [P.CONDUCTION, P.PLATE_GAMMA];
+    sim.convection = 0; sim.insulated = true; P.CONDUCTION = 0; P.PLATE_GAMMA = 0;
+    run(sim, 2); // (settling into the insulated jar)
+    const all = Array.from({ length: sim.n }, function (_, i) { return i; });
+    let top = P.H, cx = 0;
+    all.forEach(function (i) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / all.length; });
+    const T0 = avgT(sim, all, 1);
+    sim.grabStart(cx, top + 20, 120);
+    // lift, carry sideways, hold still
+    avgT(sim, all, 3, function (f) { sim.grabMove(cx - 600 * Math.max(0, f * 2 - 1), top + 20 - 800 * Math.min(1, f * 2)); });
+    const T1 = avgT(sim, all, 2);
+    P.CONDUCTION = saved[0]; P.PLATE_GAMMA = saved[1];
+    let bottom = 0;
+    all.forEach(function (i) { bottom = Math.max(bottom, sim.y[i]); });
+    assert.ok(bottom < P.H - 400, sym + ' lump did not come up whole (bottom at ' + Math.round(P.H - bottom) + ')');
+    assert.ok(T1 - T0 < 30, sym + ' warmed from ' + Math.round(T0) + ' K to ' + Math.round(T1) + ' K while held and carried');
+    if (sym !== 'Fe') return;
+    // fling it at the left wall and let go
+    sim.insulated = false; sim.convection = P.CONVECTION;
+    avgT(sim, all, 0.6, function (f) { sim.grabMove(cx - 600 - 3000 * f, top + 20 - 800); });
+    sim.grabEnd();
+    run(sim, 3);
+    const parent = new Int32Array(sim.n);
+    for (let i = 0; i < sim.n; i++) parent[i] = i;
+    const find = function (a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+    const r = 2.8 * CE.elements[Z(sym)].radius;
+    for (let i = 0; i < sim.n; i++) for (let j = i + 1; j < sim.n; j++) if (Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]) < r) parent[find(i)] = find(j);
+    const size = new Map();
+    all.forEach(function (i) { const q = find(i); size.set(q, (size.get(q) || 0) + 1); });
+    const piece = Math.max.apply(null, Array.from(size.values())) / all.length;
+    assert.ok(piece > 0.97, 'thrown iron broke up: largest piece ' + piece.toFixed(2));
+  });
+});
+
 test('graphite on a hot plate reads the plate temperature', function () {
   const sim = newSim(42);
   sim.insulated = true;
   sim.addMoles(Z('C'), 0.3, P.W / 2, P.H - 200);
   sim.plateTemp = 800;
-  run(sim, 15);
-  assert.ok(sim.temperature > 500 && sim.temperature < 1100, 'graphite at ' + Math.round(sim.temperature) + ' K on an 800 K plate');
+  run(sim, 12);
+  let T = 0;
+  for (let k = 0; k < 30; k++) { run(sim, 0.1); T += sim.temperature / 30; }
+  assert.ok(T > 500 && T < 1100, 'graphite at ' + Math.round(T) + ' K on an 800 K plate');
 });
 
 test('freshly added molecules start near room temperature', function () {
@@ -615,8 +675,10 @@ test('the gauge reads no vapour over a non-volatile solid, and a lump with a str
   assert.ok(edge >= 0, 'graphite has an edge carbon with a free valence');
   const o = c.addAtom(Z('O'), c.x[edge], c.y[edge] - 14);
   c.addBond(edge, o, 1, C.bondClass(Z('C'), Z('O')));
-  const net = c.analyze().find(function (s) { return s.key.slice(-2) === ')n'; });
-  assert.ok(net && net.mol > 0.25, 'the lump still counts about 0.3 mol: ' + (net ? net.key + ' ' + net.mol.toFixed(3) : 'none'));
+  // (the graphite may have grown as more than one sheet: count every network)
+  const nets = c.analyze().filter(function (s) { return s.key.slice(-2) === ')n'; });
+  const total = nets.reduce(function (a, s) { return a + s.mol; }, 0);
+  assert.ok(total > 0.25, 'the lump still counts about 0.3 mol: ' + nets.map(function (s) { return s.key + ' ' + s.mol.toFixed(3); }).join(', '));
 });
 
 test('removing particles keeps bonds consistent', function () {

@@ -15,7 +15,10 @@
     MAXB: 8, // max bonds per atom
     KB: 1500, // simulation Boltzmann constant: m*v^2/2 = KB*T per particle (2D)
     R_KJ: 0.008314, // kJ/(mol K)
-    DT: 0.0015,
+    DT: 0.001, // substep (s): short enough to follow the vibrations of a strongly bound metal
+    // lattice without the integrator leaking energy into it (a held lump would warm by itself)
+    DT_REF: 0.0015, // the rates below given "per substep" are for a substep this long, and are
+    // rescaled to DT so that what happens per simulated second does not depend on DT
     W: 2400, // jar interior width (world units)
     H: 3200, // jar interior height
     MOL_PER_PARTICLE: 0.001,
@@ -59,23 +62,11 @@
     ANNEAL_ANGLE: 0.5, // ...turning a molecule by up to this many radians...
     ANNEAL_SHIFT: 3, // ...and shifting it by up to this many units
     ICE_A: 31, // O-O spacing of the ice honeycomb: wide enough that ice takes ~7% more room than the liquid (real: 9%)
-    CRYSTAL_K: 800, // stiffness (1/s^2) pulling crystal members to their lattice sites (ice)
-    // A metal crystal is far stiffer: its lattice springs are CRYSTAL_K_PER_MP (1/s^2 per K of
-    // melting point) and saturate after CRYSTAL_W_METAL units of displacement, so the solid is
-    // elastic and strong (it does not deform when dropped or thrown) yet a hard enough blow yields
-    // it instead of storing unlimited energy. Heat shakes atoms against the springs, and past the
-    // melting point the crystal lets go of them.
-    CRYSTAL_K_PER_MP: 8,
-    CRYSTAL_K_METAL_MIN: 12000, // ...but never softer than this: lead, tin and aluminium are weak
-    // only next to iron; a lump of any of them comes up whole when lifted by a corner
-    CRYSTAL_W_METAL: 5,
-    // Salts and oxides, and molecular solids such as iodine or sulfur below their melting point,
-    // are held by the same kind of saturating spring, to the place each atom had when it joined: an
-    // amorphous template rather than an ideal lattice, since these solids already sit in their own
-    // packing. Pair forces alone are far too short-ranged and soft to carry a lump's weight when it
-    // is lifted by one corner. (Covalent networks such as graphite are held by their own bonds.)
-    CRYSTAL_K_SOLID: 12000,
-    SOLID_A: 30, // neighbour reach (units) used to grow and weld these solids
+    CRYSTAL_K: 800, // stiffness (1/s^2) pulling ice members to their lattice sites: gentle, so
+    // they only order the crystal; what holds a solid together is the attraction of its atoms
+    CRYSTAL_K_METAL: 0, // ...and metal members: none, a metal orders and holds by its own
+    // cohesion (springs to a template are not interatomic forces, and leak energy as the
+    // template refits, which heats a lump that is only being held)
     CRYSTAL_JOIN_MAX_METAL: 2500, // join strain allowance (K) for metal crystals
     CRYSTAL_TRIES: 0.6, // join/nucleation attempts per atom every 4 substeps
     CRYSTAL_JOIN_MAX: 600, // a unit joins only if its new spring is strained by at most this (K)
@@ -83,7 +74,7 @@
     CRYSTAL_NUC_GLASS: 0.02, // chance per attempt that cold material on the glass starts a crystal
     CRYSTAL_NUC_BULK: 0.0001, // ...and in the bulk
     CRYSTAL_GLASS_RANGE: 45, // "on the glass": this close to a wall or the floor
-    CRYSTAL_MAX_GRAINS: 160,
+    CRYSTAL_MAX_GRAINS: 40,
     CRYSTAL_MAX_MEMBERS: 4000,
     // Metallic cohesion has two parts. A pair well, METAL_EPS_PER_MP K per K of melting point,
     // sets the melting point. A many-body embedding, -C smoothstep((rho - RHO_A) / (RHO_B - RHO_A))
@@ -91,26 +82,37 @@
     // packed: crystal and melt gain the same, so it leaves melting alone, but a lone atom, a small
     // cluster or a froth gains nothing. That is the cohesion that keeps real liquid metals together
     // far above their melting points (the wide liquid range a pair well cannot give, least of all
-    // in two dimensions). C = METAL_DENSE_PER_MP K per K of melting point, at most 3 K per K of
-    // boiling point. Calibrated on iron: melts at ~1800 K, under 1% vapour up to ~2600 K
-    METAL_EPS_PER_MP: 1.45,
-    METAL_DENSE_PER_MP: 5.2,
-    METAL_RHO_A: 1,
-    METAL_RHO_B: 3.5,
+    // in two dimensions). C makes up the rest of the metal's real cohesive energy (METAL_COHESION,
+    // the energy to pull the solid apart into free atoms) beyond what the pair well gives, so a
+    // lump holds its atoms as firmly as the real metal: iron 413 kJ/mol, about 27 times its
+    // melting temperature, where the pair well alone gives under 7
+    METAL_EPS_PER_MP: 2.2, // (calibrated on iron, lead and mercury with nothing else ordering the
+    // crystal: the pair well alone decides where the solid melts)
+    METAL_EMBED: 1, // (0 switches the many-body term off)
+    METAL_RHO_A: 0.2, // rho is about 3.3 inside a solid, 2.9 inside a melt and 2.2 at a flat
+    METAL_RHO_B: 1.6, // surface: all of them saturate the embedding, so it cannot favour the
+    // crystal (a window reaching the melt's density froze mercury at room temperature); it acts on
+    // atoms being pulled out of the metal (a corner atom, one leaving for the vapour, the last
+    // threads of a crack)
+    METAL_RHO_REACH: 2.2, // reach of the embedding density, in contact distances: beyond the
+    // nearest neighbours (as the electron density of a real metal reaches), so it tells the inside
+    // of a lump (crystal or melt alike) from its surface, and opening a crack costs real cohesion
     METAL_RC_FACTOR: 1.45, // reach of metal-metal attraction, in contact distances
-    GRAB_OMEGA: 25, // grab tool: stiffness of the pull toward the hand (1/s)...
-    GRAB_MAX_ACCEL: 20000, // ...and its strongest pull (units/s^2): a firm grip, below what a metal
-    // lattice bond can hold, so a solid comes along whole while a liquid tears
+    GRAB_OMEGA: 12, // grab tool: stiffness of the pull toward the hand (1/s)...
+    GRAB_MAX_SPEED: 300, // ...the fastest it moves what it holds (units/s; a few times the thermal
+    // speed of its atoms, so what it carries through a gas is not scorched by the gas)...
+    GRAB_MAX_ACCEL: 5000, // ...and how hard it accelerates it (units/s^2): a patch of liquid is
+    // pulled out of the pool when its cohesion cannot keep up
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
     G_SOLID: 110, // gentler settling for solids, so a lump keeps its shape instead of being
     // crushed flat by its own weight (molecular-scale gravity this strong would exceed cohesion) // extra gravity for particles touching others (liquids/solids settle)
+    G_EASE: 0.01, // fraction of the way the settling force on an atom moves to its new value per substep
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
-    BULK_VMAX_FLOOR: 15, // ... near the floor, so material lands softly
-    LN_COLL: 18, // ln of real collisions represented by one simulated contact-step
+    LN_COLL: 18, // ln of real collisions represented by one simulated contact-step (of DT_REF)
     LN_UNI: 16, // ln of the unimolecular attempt frequency (bond dissociation)
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
@@ -143,7 +145,8 @@
     CONVECTION: 0.4, // convective heat exchange (1/s) of the whole jar with the plate, max at bottom
     VALVE_HALF: 140,
     PUMP_RATE: 0.7, // vacuum pump: fraction of the gas removed per simulated second // half-width of the valve opening in the lid
-    MAX_STEP: 6, // max displacement per substep (keeps the integrator stable)
+    MAX_STEP: 6, // max displacement per substep (keeps the integrator stable; a limit per substep
+    // whatever DT is: clipping bonded atoms harder pumps energy into stiff networks such as graphite)
     TCELL: 160, // size of the coarse cells used for the local temperature field
     T_PRIOR: 2,
     SELF_T_RATE: 0.02, // EMA rate of an atom's own kinetic temperature (per substep)
@@ -182,30 +185,28 @@
     CO2: 1.66, CH4: 1.19, CO: 0.68, ClH: 0.90, H3N: 0.43, C2H6O: 2.17, C6H6: 2.24, H2O2: 0.93
   };
 
-  // Melting points (K) of ionic compounds (and of a few molecular metal halides, FeCl3, AlCl3), by
-  // reduced Hill formula, so that salts and oxides hold together until they really melt (CRC Handbook; the decomposition temperature for compounds
-  // that break down before melting). Other ionic compounds use SOLID_MELT_IONIC.
-  const SOLID_MELT = {
-    ClNa: 1074, ClK: 1044, ClLi: 878, FNa: 1266, BrNa: 1020, INa: 934, BrK: 1007, IK: 954, FK: 1131,
-    FLi: 1121, CaCl2: 1045, Cl2Mg: 987, CaF2: 1691, BaCl2: 1235, MgO: 3098, CaO: 2886, BaO: 2196,
-    OSr: 2804, Al2O3: 2345, Fe2O3: 1838, FeO: 1650, Fe3O4: 1870, CuO: 1599, Cu2O: 1508, OZn: 2248,
-    O2Ti: 2116, Na2O: 1405, K2O: 1013, Li2O: 1711, HNaO: 591, HKO: 679, HLiO: 735, CaH2O2: 853,
-    H2MgO2: 623, HNa: 911, HLi: 962, HK: 690, CaH2: 1089, H2Mg: 600, Cl2Fe: 950, Cl3Fe: 579, Cl2Cu: 771,
-    AgCl: 728, Ag2O: 473, Cl2Zn: 563, SZn: 2103, Na2S: 1449, CaS: 2798, Cr2O3: 2708, NiO: 2228,
-    CoO: 2206, MnO2: 808, O2U: 3138, Li3N: 1086, Mg3N2: 1773, C2Ca: 2433, AlCl3: 453, O2Sn: 1903,
-    OPb: 1161, HgO: 773, FeS: 1467
-  };
-  const SOLID_MELT_IONIC = 1200;
   const HALOGENS = new Set([9, 17, 35, 53, 85]);
 
+  // Cohesive energies of metals (kJ/mol: the energy to take the solid apart into free atoms; Kittel,
+  // Introduction to Solid State Physics). Other metals use 0.12 kJ/mol per K of boiling point,
+  // which fits these to within about 20%.
+  const METAL_COHESION = {
+    Li: 158, Be: 320, Na: 107, Mg: 145, Al: 327, K: 90.1, Ca: 178, Sc: 376, Ti: 468, V: 512, Cr: 395,
+    Mn: 282, Fe: 413, Co: 424, Ni: 428, Cu: 336, Zn: 130, Ga: 271, Rb: 82.2, Sr: 166, Y: 422, Zr: 603,
+    Nb: 730, Mo: 658, Tc: 661, Ru: 650, Rh: 554, Pd: 376, Ag: 284, Cd: 112, In: 243, Sn: 303, Cs: 77.6,
+    Ba: 183, La: 431, Hf: 621, Ta: 782, W: 859, Re: 775, Os: 788, Ir: 670, Pt: 564, Au: 368, Hg: 65,
+    Tl: 182, Pb: 196, Bi: 210, Th: 598, U: 536, Pu: 347
+  };
+
   // Per-element constants
-  const mass =new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
+  const mass = new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
   const en = new Float32Array(NZ), maxVal = new Uint8Array(NZ), normVal = new Uint8Array(NZ);
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
   const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ);
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   const meltK = new Float32Array(NZ); // melting point (K)
   const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ), pairRcIon = new Float32Array(NZ * NZ);
+  const pairRhoRc = new Float32Array(NZ * NZ); // reach of the metallic embedding density
   const ionCap = new Uint8Array(NZ); // can form ionic bonds with some element
   const catR = new Float32Array(NZ), anR = new Float32Array(NZ); // ionic contact radii (units)
   const pairEps = new Float32Array(NZ * NZ), pairMetalEps = new Float32Array(NZ * NZ);
@@ -225,7 +226,9 @@
     isMetal[z] = e.isMetal ? 1 : 0;
     vdwEps[z] = e.vdwEps;
     metalEps[z] = e.isMetal ? P.METAL_EPS_PER_MP * (e.mp || 1000) : 0;
-    metalA[z] = e.isMetal ? Math.min(P.METAL_DENSE_PER_MP * (e.mp || 1000), 3 * (e.bp || 3000)) * P.KB : 0;
+    // cohesive energy (K per atom) minus the pair well's share: half of 6 close-packed neighbours
+    const coh = (METAL_COHESION[e.symbol] || 0.12 * (e.bp || 3000)) / P.R_KJ;
+    metalA[z] = e.isMetal ? P.METAL_EMBED * Math.max(0, coh - 3 * metalEps[z]) * P.KB : 0;
     // the settling force on a free metal atom, scaled down for heavy, weakly bound metals (it is
     // proportional to mass), so that it never squeezes liquid mercury or gallium into a crystal
     metalG[z] = e.isMetal ? Math.min(1, metalEps[z] / mass[z] / P.METAL_G_REF) : 1;
@@ -242,6 +245,7 @@
       // metallic attraction reaches further: a longer-ranged attraction gives a wide liquid range
       // (a short one sublimes the solid almost as soon as it melts, especially in two dimensions)
       pairRc[p] = pairSigma[p] * (isMetal[a] && isMetal[b] ? P.METAL_RC_FACTOR : P.RC_FACTOR);
+      pairRhoRc[p] = isMetal[a] && isMetal[b] ? pairSigma[p] * P.METAL_RHO_REACH : 0;
       pairEps[p] = Math.sqrt(vdwEps[a] * vdwEps[b]) * P.KB;
       pairMetalEps[p] = Math.sqrt(metalEps[a] * metalEps[b]) * P.KB;
     }
@@ -302,16 +306,16 @@
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
-    this.solidT = new Float32Array(M); // ...up to which it is held in a solid grain (0: not such a solid)
     this.netF = new Uint8Array(M); // 1: part of a covalent network (graphite, silicon, sulfur chains)
     this.coh = new Float32Array(M).fill(1); // cohesion factor of the molecule (see COHESION)
     this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
     this.grab = null; // the grab tool's hold (see grabStart)
     this.held = new Uint8Array(M); // 1 for atoms the grab tool holds
+    this.carried = new Uint8Array(M); // 1 for the solid body hanging from them (see updateCarried)
     this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
     this.fsP = new Float64Array(M); // minus the derivative of its embedding energy
-    this.fsI = new Int32Array(8 * M); this.fsJ = new Int32Array(8 * M);
-    this.fsD = new Float64Array(16 * M); // metal pairs inside the density range: i, j, dphi/dr * (dx, dy)/d
+    this.fsI = new Int32Array(16 * M); this.fsJ = new Int32Array(16 * M);
+    this.fsD = new Float64Array(32 * M); // metal pairs inside the density range: i, j, dphi/dr * (dx, dy)/d
     this.mark = new Int32Array(M); this.markTag = 0;
     this.grains = []; // crystal grains, see the crystal engine below
     this.batch = 0;
@@ -380,8 +384,8 @@
     this.el[i] = z;
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0;
-    this.anneal[i] = P.ANNEAL_STEPS;
-    this.meltT[i] = 0; this.solidT[i] = 0; this.netF[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
+    this.anneal[i] = Math.round(P.ANNEAL_STEPS * P.DT_REF / P.DT);
+    this.meltT[i] = 0; this.netF[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -678,7 +682,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.solidT[i] = this.solidT[last]; this.netF[i] = this.netF[last]; this.gAcc[i] = this.gAcc[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.gAcc[i] = this.gAcc[last];
     this.grainOf[i] = this.grainOf[last];
     if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
     this.grainOf[last] = -1;
@@ -904,7 +908,7 @@
       if (!this.present[a]) continue;
       for (let b = a; b < NZ; b++) {
         if (!this.present[b]) continue;
-        if (pairRc[a * NZ + b] > maxRc) maxRc = pairRc[a * NZ + b];
+        maxRc = Math.max(maxRc, pairRc[a * NZ + b], pairRhoRc[a * NZ + b]);
         if (pairRcIon[a * NZ + b] > maxRc) maxRc = pairRcIon[a * NZ + b];
       }
     }
@@ -999,9 +1003,9 @@
       const dx = x[j] - x[i], dy = y[j] - y[i];
       const d2 = dx * dx + dy * dy;
       const ei = el[i], ej = el[j], p = ei * NZ + ej;
-      const rc = pairRc[p];
+      const rc = pairRc[p], rr = pairRhoRc[p];
       const ionic = ion[i] && ion[j], rcq = ionic ? pairRcIon[p] : rc;
-      if (d2 >= rc * rc && (!ionic || d2 >= rcq * rcq)) return;
+      if (d2 >= rc * rc && (!ionic || d2 >= rcq * rcq) && d2 >= rr * rr) return;
       if (nb[i] && nb[j]) {
         // excluded pairs: bonded (1-2) or sharing a bonded neighbour (1-3); inlined, it is hot
         const bi = i * MB, nbi = nb[i];
@@ -1013,11 +1017,24 @@
         }
       }
       const d = Math.sqrt(d2) || 1e-6;
+      const fm = isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j];
+      if (fm && d2 < rr * rr) {
+        // metallic density phi(d) = (1 - (d/R)^2)^3 out to its reach R: smooth (twice
+        // differentiable everywhere), so the integrator keeps the energy of these strong forces
+        const u = 1 - d2 / (rr * rr), phi = u * u * u;
+        rho[i] += phi; rho[j] += phi;
+        if (nFs < fsMax) {
+          const dphi = -6 * u * u / (rr * rr); // (dphi/dd) / d
+          fsI[nFs] = i; fsJ[nFs] = j; fsD[2 * nFs] = dphi * dx; fsD[2 * nFs + 1] = dphi * dy; nFs++;
+        }
+      }
       if (d2 >= rc * rc) {
         // two ions beyond the contact range: long-range Coulomb only
-        const F = P.KC * P.ION_KC * q[i] * q[j] * (1 / d2 - 1 / (rcq * rcq));
-        const fxp = F * dx / d, fyp = F * dy / d;
-        fx[i] -= fxp; fy[i] -= fyp; fx[j] += fxp; fy[j] += fyp;
+        if (ionic) {
+          const F = P.KC * P.ION_KC * q[i] * q[j] * (1 / d2 - 1 / (rcq * rcq));
+          const fxp = F * dx / d, fyp = F * dy / d;
+          fx[i] -= fxp; fy[i] -= fyp; fx[j] += fxp; fy[j] += fyp;
+        }
         return;
       }
       let sigma = ionic ? (q[i] > 0 ? catR[ei] : anR[ei]) + (q[j] > 0 ? catR[ej] : anR[ej]) : pairSigma[p];
@@ -1028,19 +1045,6 @@
       if ((ghostT[i] || ghostT[j]) && self.isGhost(i, j)) {
         if (d < sigma) return;
         self.clearGhost(i, j);
-      }
-      const fm = isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j];
-      if (fm) {
-        // metallic density phi(d): 1 in contact, fading as (1 - s^2)^2 out to the cutoff
-        if (d <= sigma) { rho[i]++; rho[j]++; }
-        else {
-          const w = rc - sigma, s = (d - sigma) / w, t = 1 - s * s;
-          rho[i] += t * t; rho[j] += t * t;
-          if (nFs < fsMax) {
-            const dphi = -4 * s * t / w / d;
-            fsI[nFs] = i; fsJ[nFs] = j; fsD[2 * nFs] = dphi * dx; fsD[2 * nFs + 1] = dphi * dy; nFs++;
-          }
-        }
       }
       let F = 0; // positive = repulsive
       if (d < sigma) {
@@ -1191,7 +1195,8 @@
   // ---------------------------------------------------------------------------------------
   S.integrate = function () {
     const n = this.n, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
-    const dt = P.DT, dt2 = dt * dt, maxS = P.MAX_STEP;
+    const dt = P.DT, dt2 = dt * dt, sub = dt / P.DT_REF, maxS = P.MAX_STEP;
+    const condRate = perSub(0.04), gEase = perSub(P.G_EASE), selfRate = perSub(P.SELF_T_RATE);
     const contacts = this.contacts;
     const tgw = this.tgw, tgh = this.tgh, tSum = this.tSum, tCnt = this.tCnt, tCell = this.tCell;
     // condensed matter and gas are summed apart: where both share a cell, the few gas molecules
@@ -1222,7 +1227,7 @@
       if (!c) for (let k = 0; k < this.nb[i]; k++) if (contacts[this.bp[i * MB + k]] >= 2) { c = 1; break; }
       // changes gradually both ways: a force that flickers with contacts would pump energy into
       // surface molecules
-      condF[i] += 0.04 * (c - condF[i]);
+      condF[i] += condRate * (c - condF[i]);
     }
     for (let i = 0; i < n; i++) {
       // a held body moves with the hand: it is not part of the flow of what it passes through
@@ -1252,11 +1257,16 @@
       }
       let g = (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       if (this.nb[i] === 0) g *= metalG[el[i]];
-      if (held && held[i]) g = 0; // the hand carries the weight of what it holds
+      // the hand carries the weight of what it holds: the patch it grips and the solid body
+      // hanging from it (the settling force is far stronger than real gravity on this scale;
+      // its weight would tear a held lump apart, which real weight never does to a small one)
+      if (held && (held[i] || this.carried[i])) g = 0;
       g += P.G_GAS;
+      // eased in time: a settling force that flickers as material moves between crowded and empty
+      // regions (a lump carried across the jar) would pump energy into it
+      g = this.gAcc[i] + gEase * (g - this.gAcc[i]);
       this.gAcc[i] = g;
-      // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
-      // floor, so settling liquids/solids land softly instead of heating up on impact
+      // cap the local bulk flow speed (not thermal motion) of condensed matter
       let bvx = 0, bvy = 0, noise = -1;
       if (held && held[i]) {
         // a held body moves as one with the hand: that is its flow, under the same speed limits
@@ -1277,15 +1287,6 @@
         const vmaxB = Math.max(noise, P.BULK_VMAX) * dt;
         const vb = Math.sqrt(bvx * bvx + bvy * bvy);
         if (vb > vmaxB) { const f = 1 - vmaxB / vb; vx -= bvx * f; vy -= bvy * f; bvx *= 1 - f; bvy *= 1 - f; }
-        // approaching the floor or the glass, the flow toward it slows, so dropped or thrown
-        // material lands softly instead of shattering or heating up: at this scale the fastest
-        // flow (BULK_VMAX) is only centimetres per second in the real-world jar
-        const lim = function (dist) { return Math.max(noise, dist < 250 ? P.BULK_VMAX_FLOOR + (P.BULK_VMAX - P.BULK_VMAX_FLOOR) * dist / 250 : P.BULK_VMAX) * dt; };
-        let l;
-        if (bvy > 0 && bvy > (l = lim(H - y[i]))) vy -= bvy - l;
-        else if (bvy < 0 && -bvy > (l = lim(y[i]))) vy += -bvy - l;
-        if (bvx > 0 && bvx > (l = lim(W - x[i]))) vx -= bvx - l;
-        else if (bvx < 0 && -bvx > (l = lim(x[i]))) vx += -bvx - l;
       }
       // soft walls (energy conserving with bond constraints, unlike reflections)
       const rw = radius[el[i]] * 0.6;
@@ -1354,9 +1355,11 @@
         const c1 = Math.exp(-gamma * dt);
         const sd = Math.sqrt((1 - c1 * c1) * P.KB * Tw * im) * dt;
         // cheap unit-variance noise (sum of 3 uniforms); exact Gaussians are not needed here
-        // a held body is thermostatted about its own motion, so the plate or glass does not
-        // anchor what the hand is lifting
-        const hvx = held && held[i] ? grab.vx : 0, hvy = held && held[i] ? grab.vy : 0;
+        // a held body is thermostatted about its own motion: heat exchange is not friction, so
+        // the plate, glass or air does not anchor what the hand is lifting (dragging the rest
+        // of a lump against the patch in the hand would strain and heat it)
+        const hvx = held ? (held[i] ? grab.vx : this.carried[i] ? grab.bvx : 0) : 0;
+        const hvy = held ? (held[i] ? grab.vy : this.carried[i] ? grab.bvy : 0) : 0;
         vx = hvx + (vx - hvx) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
         vy = hvy + (vy - hvy) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
       }
@@ -1381,7 +1384,7 @@
       this.cellOfT[i] = tc;
       if (condF[i] <= 0.5 && !(held && held[i])) { tSumG[tc] += tInst; tCntG[tc] += 0.5 * dof; }
       else { tSum[tc] += tInst; tCnt[tc] += 0.5 * dof; }
-      this.tSelf[i] += P.SELF_T_RATE * (tInst * dofScale - this.tSelf[i]);
+      this.tSelf[i] += selfRate * (tInst * dofScale - this.tSelf[i]);
       cellKE[tc] += tInst * P.KB;
       ke += tInst;
       dofHalf += 0.5 * dof;
@@ -1409,7 +1412,8 @@
         tNew[cy * tgw + cx] = (sum + wg * sumG + N0 * globalT) / (cnt + wg * cntG + N0);
       }
     }
-    for (let c = 0; c < tCell.length; c++) tCell[c] += 0.3 * (tNew[c] - tCell[c]);
+    const tRate = perSub(0.3);
+    for (let c = 0; c < tCell.length; c++) tCell[c] += tRate * (tNew[c] - tCell[c]);
     // kinetics see a blend of the regional field and the atom's own recent temperature, so a
     // small hot spot (a flame front in a dilute gas) is not averaged away
     const ws = P.SELF_T_WEIGHT;
@@ -1430,13 +1434,16 @@
       for (let c = 0; c < cellDebt.length; c++) {
         fac[c] = 1;
         if (cellDebt[c] <= 0 || cellKE[c] <= 0) continue;
-        const pay = Math.min(cellDebt[c], cellKE[c] * 0.2);
+        const pay = Math.min(cellDebt[c], cellKE[c] * 0.2 * sub);
         cellDebt[c] -= pay;
         fac[c] = Math.sqrt(1 - pay / cellKE[c]);
       }
       for (let i = 0; i < n; i++) {
         const f = fac[this.cellOfT[i]];
-        if (f !== 1 && !(held && held[i])) { px[i] = x[i] - (x[i] - px[i]) * f; py[i] = y[i] - (y[i] - py[i]) * f; }
+        if (f === 1 || (held && held[i])) continue;
+        // (what the hand carries is cooled about its own motion, not slowed down)
+        const ux = held && this.carried[i] ? grab.bvx : 0, uy = held && this.carried[i] ? grab.bvy : 0;
+        px[i] = x[i] - ux - (x[i] - px[i] - ux) * f; py[i] = y[i] - uy - (y[i] - py[i] - uy) * f;
       }
     }
     this.impulse += impulse;
@@ -1531,7 +1538,7 @@
   // geometry change of a new/changed bond never turns into velocity - even in networks where
   // many bonds ramp at once.
   S.rampBonds = function () {
-    const n = this.n, MB = P.MAXB, el = this.el, bl = this.bl, ramp = P.BOND_RAMP;
+    const n = this.n, MB = P.MAXB, el = this.el, bl = this.bl, ramp = P.BOND_RAMP * P.DT / P.DT_REF;
     let any = false;
     for (let i = 0; i < n; i++) {
       const base = i * MB;
@@ -1825,7 +1832,7 @@
     }
     if (P.W3_EPS) U += this.waterAngleEnergyNear(set, count);
     if (P.W2_EPS) U += this.waterDenseEnergyNear(set, count);
-    if (P.METAL_DENSE_PER_MP) U += this.metalEnergyNear(set, count);
+    if (P.METAL_EMBED) U += this.metalEnergyNear(set, count);
     return U;
   };
 
@@ -1839,23 +1846,28 @@
     this.query(x[i], y[i], this.cellSize, function (j) {
       if (j === i || !isMetal[el[j]] || nb[j]) return;
       if (sign && (mark[j] === tag) !== (sign > 0)) return;
-      const p = ei * NZ + el[j], rc = pairRc[p], sigma = pairSigma[p];
+      const p = ei * NZ + el[j], rc = pairRhoRc[p];
       const dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
       if (d2 >= rc * rc) return;
-      const d = Math.sqrt(d2);
-      if (d <= sigma) r++;
-      else { const s = (d - sigma) / (rc - sigma), t = 1 - s * s; r += t * t; }
+      const u = 1 - d2 / (rc * rc);
+      r += u * u * u;
     });
     return r;
   };
+  // a rate given per substep of DT_REF, for a substep of DT
+  function perSub(r) { return 1 - Math.pow(1 - r, P.DT / P.DT_REF); }
+  // ln of the real collisions one contact-step represents (LN_COLL is for a substep of DT_REF)
+  function lnColl() { return P.LN_COLL + Math.log(P.DT / P.DT_REF); }
+
   // the embedding energy F(rho) of a free metal atom and its derivative
+  // (smootherstep in the density: its curvature too is continuous, which keeps the energy)
   function embed(z, r) {
     const t = (r - P.METAL_RHO_A) / (P.METAL_RHO_B - P.METAL_RHO_A);
-    return t <= 0 ? 0 : t >= 1 ? -metalA[z] : -metalA[z] * t * t * (3 - 2 * t);
+    return t <= 0 ? 0 : t >= 1 ? -metalA[z] : -metalA[z] * t * t * t * (t * (6 * t - 15) + 10);
   }
   function embedD(z, r) {
     const t = (r - P.METAL_RHO_A) / (P.METAL_RHO_B - P.METAL_RHO_A);
-    return t <= 0 || t >= 1 ? 0 : -metalA[z] * 6 * t * (1 - t) / (P.METAL_RHO_B - P.METAL_RHO_A);
+    return t <= 0 || t >= 1 ? 0 : -metalA[z] * 30 * t * t * (1 - t) * (1 - t) / (P.METAL_RHO_B - P.METAL_RHO_A);
   }
 
   // Embedding energy that changes when the atoms of set move or change: their own, plus that of
@@ -2152,7 +2164,7 @@
       const canI = this.canAccept(i, ej) && !this.loneC(i), canJ = this.canAccept(j, ei) && !this.loneC(j);
       if (canI && canJ) {
         // radical + radical: nearly barrierless recombination
-        if (rng() < Math.exp(Math.min(0, P.LN_COLL - 4 / RT))) {
+        if (rng() < Math.exp(Math.min(0, lnColl() - 4 / RT))) {
           this.beginEvent(i, j, -1, -1);
           this.addBond(i, j, 1, cls);
           this.endEvent(i, j);
@@ -2194,7 +2206,7 @@
         // (and other metals meet the same halide-layer barrier as in dissociativeAdsorption)
         const passive = isMetal[el[a]] && en[el[a]] >= P.ET_EN && HALOGENS.has(el[b]) ? P.PASSIVE_BARRIER : 0;
         const Ea = alpha * step + Math.max(0, dH) + spin + passive;
-        if (rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT)) && this.canAfford(a, b, dH)) {
+        if (rng() < Math.exp(Math.min(0, lnColl() - Ea / RT)) && this.canAfford(a, b, dH)) {
           this.beginEvent(a, b, k, -1);
           this.setBond(b, k, this.bondOrder(b, k) - 1);
           this.addBond(a, b, 1, cls);
@@ -2210,7 +2222,7 @@
           const full = C.bondEnergy(el[b], el[k], ord);
           const dHt = full - E1;
           const Eat = P.ALPHA * full + Math.max(0, dHt) + spin;
-          if (Eat / RT < P.LN_COLL + 12 && rng() < Math.exp(Math.min(0, P.LN_COLL - Eat / RT)) && this.canAfford(a, b, dHt)) {
+          if (Eat / RT < lnColl() + 12 && rng() < Math.exp(Math.min(0, lnColl() - Eat / RT)) && this.canAfford(a, b, dHt)) {
             this.beginEvent(a, b, k, -1);
             this.setBond(b, k, 0);
             this.addBond(a, b, 1, cls);
@@ -2246,8 +2258,8 @@
       // of hydrogen and fluorine; with chlorine or oxygen the same step is far uphill). Swapping
       // both pairs at once (formKL) is the symmetry-forbidden four-centre route
       const Ea = (formKL ? P.ALPHA_4C * breakSum : P.ALPHA * Math.min(sI, sJ)) + Math.max(0, dH) + spin4;
-      if (Ea / RT > P.LN_COLL + 12) continue;
-      if (rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT)) && this.canAfford(i, j, dH)) {
+      if (Ea / RT > lnColl() + 12) continue;
+      if (rng() < Math.exp(Math.min(0, lnColl() - Ea / RT)) && this.canAfford(i, j, dH)) {
         this.beginEvent(i, j, k, l);
         this.setBond(i, k, this.bondOrder(i, k) - 1);
         this.setBond(j, l, this.bondOrder(j, l) - 1);
@@ -2342,7 +2354,7 @@
     // heated to about 500 K; chlorine is stored in steel cylinders)
     const passive = en[el[a]] >= P.ET_EN && !spin ? P.PASSIVE_BARRIER : 0;
     const Ea = P.ALPHA_DISS * eXX + Math.max(0, dH) + spin + passive;
-    if (!(this.rng() < Math.exp(Math.min(0, P.LN_COLL - Ea / RT))) || !this.canAfford(a, b, dH)) return false;
+    if (!(this.rng() < Math.exp(Math.min(0, lnColl() - Ea / RT))) || !this.canAfford(a, b, dH)) return false;
     this.beginEvent(a, b, k, m);
     this.setBond(b, k, 0);
     this.addBond(a, b, 1, C.pairClass[pAB]);
@@ -2367,7 +2379,7 @@
         const RT = P.R_KJ * Math.max(T, 1);
         // upgrade bond order when both atoms still have free valence
         if (order < C.pairMaxOrder[p] && this.canAccept(i, ej) && this.canAccept(j, ei)) {
-          if (rng() < Math.exp(Math.min(0, P.LN_COLL - 8 / RT))) {
+          if (rng() < Math.exp(Math.min(0, lnColl() - 8 / RT))) {
             const gain = C.stepEnergy(ei, ej, order + 1);
             this.beginEvent(i, j, -1, -1);
             this.setBond(i, j, order + 1);
@@ -2413,9 +2425,9 @@
           if (!seen[b]) { seen[b] = 1; mol.push(b); }
         }
       }
-      // up to what temperature this molecule, lattice or network is held as a solid grain
-      const sT = this.solidMeltOf(mol, cache), net = mol.length > 12 && !this._solidIonic ? 1 : 0;
-      for (let k = 0; k < mol.length; k++) { this.solidT[mol[k]] = sT; this.netF[mol[k]] = net; }
+      // a covalent network (graphite, silicon, sulfur chains): big and held by bonds, not ions
+      const net = mol.length > 12 && !this.hasIonicBond(mol) ? 1 : 0;
+      for (let k = 0; k < mol.length; k++) this.netF[mol[k]] = net;
       let T = 0, c = 1;
       if (mol.length > 1 && mol.length <= 12) {
         const counts = {};
@@ -2444,47 +2456,12 @@
     }
   };
 
-  // Melting point of the solid that the atoms in `mol` (one molecule or ionic lattice) form, or 0
-  // when they do not form one held by a solid grain: free metal atoms (their own crystals), water
-  // (ice), covalent networks (their own bonds hold them: graphite, silicon, sulfur chains), and
-  // liquids or gases of unknown melting point. Leaves whether mol is ionic in _solidIonic.
-  S.solidMeltOf = function (mol, cache) {
-    const n = mol.length, MB = P.MAXB, el = this.el;
-    this._solidIonic = false;
-    if (n < 2) return 0;
-    const counts = {};
-    let ionic = false;
-    for (let k = 0; k < n; k++) {
-      const a = mol[k];
-      counts[el[a]] = (counts[el[a]] || 0) + 1;
-      if (!ionic) for (let b = 0; b < this.nb[a]; b++) if (this.bc[a * MB + b] === 2) { ionic = true; break; }
-    }
-    this._solidIonic = ionic;
-    if (n > 12 && !ionic) return 0;
-    // a fragment of a network former with free valences (C2, Si3) is a radical that bonds on into
-    // its network, not a molecular solid: no springs should hold it in place (sulfur's chains,
-    // which stand in for its S8 rings, stay a molecular solid)
-    if (!ionic) for (let k = 0; k < n; k++) if (normVal[el[mol[k]]] >= 3 && this.used[mol[k]] < normVal[el[mol[k]]]) return 0;
-    const zs = Object.keys(counts);
-    if (n === 3 && counts[1] === 2 && counts[8] === 1) return 0; // water: the ice crystal engine
-    let g = 0;
-    for (const z of zs) g = gcd(g, counts[z]);
-    const red = {};
-    for (const z of zs) red[z] = counts[z] / g;
-    const sig = 's' + JSON.stringify(red) + (ionic ? 'i' : '') + (n > 12 ? 'L' : '');
-    let T = cache.get(sig);
-    if (T !== undefined) return T;
-    const hill = C.hillFormula(red);
-    if (ionic) T = SOLID_MELT[hill] || SOLID_MELT_IONIC;
-    else if (zs.length === 1) {
-      // one element: a documented molecule (I2, Br2, N2...) or a small ring or chain (S4...S8,
-      // P4) that melts with the element
-      T = (CE.phase && CE.phase.meltingPoint(C.describe(counts, n, false).key)) || meltK[+zs[0]];
-    } else T = (CE.phase && CE.phase.meltingPoint(C.describe(counts, n, false).key)) || SOLID_MELT[hill] || 0;
-    cache.set(sig, T);
-    return T;
+
+  S.hasIonicBond = function (mol) {
+    const MB = P.MAXB;
+    for (const a of mol) for (let b = 0; b < this.nb[a]; b++) if (this.bc[a * MB + b] === 2) return true;
+    return false;
   };
-  function gcd(a, b) { while (b) { const t = b; b = a % b; a = t; } return a; }
 
   // Solid-state annealing. Like reactions, molecular rearrangement in a solid is time-compressed:
   // every simulated moment stands for a great many real vibrations, during which molecules in a
@@ -2493,7 +2470,7 @@
   // local temperature. That only speeds up reaching equilibrium (a cooled liquid freezes into a
   // crystal instead of a glass); the energy change is paid from or given to the local heat.
   S.solidAnneal = function () {
-    const n = this.n, frac = P.ANNEAL_TRIALS;
+    const n = this.n, frac = P.ANNEAL_TRIALS * P.DT / P.DT_REF;
     if (!frac || !n) return;
     const x = this.x, y = this.y, el = this.el, rng = this.rng;
     const set = this._anSet || (this._anSet = new Int32Array(6));
@@ -2604,12 +2581,10 @@
   S.crystalKind = function (i) {
     if (this.isWaterO(i)) return 1;
     if (isMetal[this.el[i]] && this.nb[i] === 0) return 2;
-    // any other solid (salt, oxide, network, molecular solid); its hydrogens ride on their bonds
-    if (this.solidT[i] > 0 && this.el[i] !== 1) return 3;
     return 0;
   };
-  S.crystalMeltT = function (i, kind) { return kind === 1 ? (this.meltT[i] || 273.15) : kind === 3 ? this.solidT[i] : meltK[this.el[i]]; };
-  S.crystalSpacing = function (kind, z) { return kind === 1 ? P.ICE_A : kind === 3 ? P.SOLID_A : pairSigma[z * NZ + z]; };
+  S.crystalMeltT = function (i, kind) { return kind === 1 ? (this.meltT[i] || 273.15) : meltK[this.el[i]]; };
+  S.crystalSpacing = function (kind, z) { return kind === 1 ? P.ICE_A : pairSigma[z * NZ + z]; };
 
   // lattice site nearest to rest-frame point (rx, ry): { key, x, y, sub }
   S.crystalSite = function (g, rx0, ry0) {
@@ -2670,8 +2645,7 @@
     if (!g.mem.length) return 0;
     this.crystalFit(g);
     const x = this.x, y = this.y, c = Math.cos(g.th), sn = Math.sin(g.th);
-    const k = g.kind === 2 ? Math.max(P.CRYSTAL_K_PER_MP * meltK[g.z], P.CRYSTAL_K_METAL_MIN) : g.kind === 3 ? P.CRYSTAL_K_SOLID : P.CRYSTAL_K;
-    const w2 = g.kind !== 1 ? P.CRYSTAL_W_METAL * P.CRYSTAL_W_METAL : 0;
+    const k = g.kind === 2 ? P.CRYSTAL_K_METAL : P.CRYSTAL_K;
     let U = 0;
     for (let q0 = 0; q0 < g.mem.length; q0++) {
       const u = g.mem[q0];
@@ -2680,15 +2654,8 @@
         const ax = u.rest[2 * q] - g.sx, ay = u.rest[2 * q + 1] - g.sy;
         const gx = g.cx + ax * c - ay * sn, gy = g.cy + ax * sn + ay * c;
         const dx = x[i] - gx, dy = y[i] - gy, d2 = dx * dx + dy * dy;
-        if (w2) {
-          // saturating spring: harmonic near the site, levelling off at k m w^2 (yield)
-          const e = Math.exp(-d2 / (2 * w2));
-          U += k * m * w2 * (1 - e);
-          if (forces) { this.fx[i] -= k * m * e * dx; this.fy[i] -= k * m * e * dy; }
-        } else {
-          U += 0.5 * k * m * d2;
-          if (forces) { this.fx[i] -= k * m * dx; this.fy[i] -= k * m * dy; }
-        }
+        U += 0.5 * k * m * d2;
+        if (forces) { this.fx[i] -= k * m * dx; this.fy[i] -= k * m * dy; }
       }
     }
     return U;
@@ -2716,6 +2683,13 @@
     this.grainOf[i] = this.grains.indexOf(g);
     if (U1 !== U0) this.heatRaw(i, this.crystalPartner(i), -(U1 - U0));
     return true;
+  };
+  // how close (in lattice spacings) an atom must come to a site to join a grain, and how far a
+  // member may stray from it before it leaves: springless grains (metals) only record order, so
+  // an atom joins only when it really sits on a site (a melt next to a crystal is not crystalline)
+  S.crystalSlack = function (g, join) {
+    if (g.kind === 2 && !P.CRYSTAL_K_METAL) return join ? 0.25 : 0.5;
+    return join ? 0.45 : 0.6;
   };
   S.crystalPartner = function (i) { return this.nb[i] ? this.bp[i * P.MAXB] : this.crystalNeighbour(i); };
   S.crystalNeighbour = function (i) {
@@ -2754,23 +2728,23 @@
   };
 
   // Joining, nucleation and melting, every few substeps.
-  // Grains of a metal that touch are welded into one solid: in a real metal the grain boundaries
-  // are nearly as strong as the crystals, so a cast lump holds together as one piece. The smaller
-  // grain's lattice sites are carried over into the larger grain's frame (keeping their own
-  // orientation), and the change in spring energy is settled as heat.
+  // Grains of a metal that touch are merged into one grain (bookkeeping: what holds the lump
+  // together is the metal's own cohesion). The smaller grain's lattice sites are carried over
+  // into the larger grain's frame (keeping their own orientation), and any change in spring
+  // energy is settled as heat.
   S.crystalMerge = function () {
     const grains = this.grains, x = this.x, y = this.y, self = this;
     if (grains.length < 2) return;
     const touch = new Map();
     for (let gi = 0; gi < grains.length; gi++) {
       const g = grains[gi];
-      if (g.kind === 1 || !g.mem.length) continue;
-      const r = g.a * (g.kind === 3 ? 1.6 : 1.25);
+      if (g.kind !== 2 || !g.mem.length) continue;
+      const r = g.a * 1.25;
       for (const u of g.mem) {
         const i = u.atoms[0];
         this.query(x[i], y[i], r, function (j) {
           const gj = self.grainOf[j];
-          if (gj < 0 || gj === gi || grains[gj].kind !== g.kind || (g.kind === 2 && grains[gj].z !== g.z)) return;
+          if (gj < 0 || gj === gi || grains[gj].kind !== 2 || grains[gj].z !== g.z) return;
           if ((x[j] - x[i]) ** 2 + (y[j] - y[i]) ** 2 > r * r) return;
           const key = gi < gj ? gi + ':' + gj : gj + ':' + gi;
           touch.set(key, (touch.get(key) || 0) + 1);
@@ -2824,7 +2798,7 @@
         const off = Math.hypot(x[i] - (g.cx + ax * c - ay * sn), y[i] - (g.cy + ax * sn + ay * c));
         // a member melts when it is hot itself, not merely when the gas around it is (a lump
         // swung through vapour, or a cold crystal under a flame's hot gas, stays solid)
-        if (Math.min(this.tLoc[i], this.tSelf[i]) > this.crystalMeltT(i, g.kind) + P.CRYSTAL_HYST || off > 0.6 * g.a) {
+        if (Math.min(this.tLoc[i], this.tSelf[i]) > this.crystalMeltT(i, g.kind) + P.CRYSTAL_HYST || off > this.crystalSlack(g) * g.a) {
           this.crystalEject(i);
           this.crystalFit(g);
         }
@@ -2838,7 +2812,7 @@
       for (let gi = 0; gi < keep.length; gi++) for (let q = 0; q < keep[gi].mem.length; q++) for (const i of keep[gi].mem[q].atoms) this.grainOf[i] = gi;
     }
     // candidates: cold crystallisable units not in a grain
-    const tries = Math.max(1, Math.round(n * P.CRYSTAL_TRIES));
+    const tries = Math.max(1, Math.round(n * P.CRYSTAL_TRIES * P.DT / P.DT_REF));
     this.buildGrid();
     for (let t = 0; t < tries; t++) {
       const i = Math.floor(rng() * n);
@@ -2860,25 +2834,19 @@
         if (g.mem.length >= P.CRYSTAL_MAX_MEMBERS) continue;
         this.crystalFit(g);
         const r = this.crystalToRest(g, x[i], y[i]);
-        if (kind === 3) {
-          // no ideal lattice: the atom's site is where it sits now
-          this.crystalJoin(g, i, { key: 'u' + (this._siteSerial = (this._siteSerial || 0) + 1), x: r[0], y: r[1] }, P.CRYSTAL_JOIN_MAX_METAL * P.KB);
-          continue;
-        }
         const site = this.crystalSite(g, r[0], r[1]);
-        if (g.sites.has(site.key) || Math.hypot(site.x - r[0], site.y - r[1]) > 0.45 * a) continue;
+        if (g.sites.has(site.key) || Math.hypot(site.x - r[0], site.y - r[1]) > this.crystalSlack(g, true) * a) continue;
         this.crystalJoin(g, i, site, (g.kind === 2 ? P.CRYSTAL_JOIN_MAX_METAL : P.CRYSTAL_JOIN_MAX) * P.KB);
         continue;
       }
       // nobody to join: nucleate a new grain (readily on the glass, rarely in the bulk)
       if (this.grains.length >= P.CRYSTAL_MAX_GRAINS) continue;
       let crowd = false;
-      this.query(x[i], y[i], 2.5 * a, function (j) { if (self.grainOf[j] >= 0 && self.grains[self.grainOf[j]].kind === kind) crowd = true; });
+      this.query(x[i], y[i], 2.5 * a, function (j) { if (self.grainOf[j] >= 0) crowd = true; });
       if (crowd) continue;
       const W = P.W, H = P.H, wall = Math.min(x[i], W - x[i], H - y[i]);
       const onGlass = wall < P.CRYSTAL_GLASS_RANGE;
-      // a salt, network or molecular solid is already solid: it needs no nucleus to wait for
-      if (kind !== 3 && rng() > (onGlass ? P.CRYSTAL_NUC_GLASS : P.CRYSTAL_NUC_BULK)) continue;
+      if (rng() > (onGlass ? P.CRYSTAL_NUC_GLASS : P.CRYSTAL_NUC_BULK)) continue;
       // orientation: a lattice row along the nearest glass, or the molecule's own frame
       let phi;
       const floor = H - y[i] <= Math.min(x[i], W - x[i]);
@@ -2891,7 +2859,7 @@
       const g = { kind: kind, z: this.el[i], a: a, phi: phi, e: [], mem: [], sites: new Map(), ox: x[i], oy: y[i], cx: x[i], cy: y[i], sx: x[i], sy: y[i], th: 0 };
       for (let k = 0; k < 3; k++) g.e.push(Math.cos(phi + k * 2 * Math.PI / 3), Math.sin(phi + k * 2 * Math.PI / 3));
       this.grains.push(g);
-      const site = { key: kind === 1 ? '0,0,0' : kind === 3 ? 'u0' : '0,0', x: x[i], y: y[i], sub: 0 };
+      const site = { key: kind === 1 ? '0,0,0' : '0,0', x: x[i], y: y[i], sub: 0 };
       const mem = { atoms: [i], rest: [site.x, site.y], key: site.key };
       g.mem.push(mem); g.sites.set(site.key, mem);
       this.grainOf[i] = this.grains.length - 1;
@@ -2942,7 +2910,10 @@
       this.buildGrid();
       this.computeForces();
       this.angleForces();
-      if (this.grab) this.grabForces();
+      if (this.grab) {
+        if (this.substep % 4 === 1) this.updateCarried();
+        this.grabForces();
+      }
       this.integrate();
       this.solveBonds(P.SHAKE_ITERS);
       this.rampBonds();
@@ -2966,13 +2937,12 @@
   };
 
   // ---------------------------------------------------------------------------------------
-  // Grab: the user picks up the material under the cursor and drags it. The hand holds the patch
-  // under the cursor and, with it, the solid object that patch belongs to: every solid atom
-  // touching it, and so on through the lump, plus the whole of any molecule or network it touches
-  // (a hand closing on a corner of a lump holds the lump). All of it shares one uniform pull (a critically
-  // damped spring from the patch to the hand, capped), so its own thermal motion is left alone
-  // and nothing is heated or frozen by holding it. Whatever is not part of that body follows only
-  // through its own cohesion: a liquid stretches, necks and drips, a gas slips away.
+  // Grab: the user picks up the material under the cursor and drags it. The hand holds only the
+  // patch under the cursor; the grabbed atoms share one uniform pull (a critically damped spring
+  // from their centre of mass to the hand, capped), so their own thermal motion is left alone and
+  // nothing is heated or frozen by holding it. Everything else follows only through the forces
+  // its atoms exert on each other: a solid comes along as a lump because its atoms attract one
+  // another strongly, a liquid stretches, necks and drips, a gas slips away.
   // ---------------------------------------------------------------------------------------
   S.grabStart = function (x, y, r) {
     this.buildGrid();
@@ -2987,48 +2957,12 @@
     for (const j of atoms) { cx += this.x[j]; cy += this.y[j]; }
     cx /= atoms.length; cy /= atoms.length;
     // the hand holds the patch where it was taken: target = hand + (centre - hand at the start)
-    this.grab = { patch: atoms, atoms: [], hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0 };
-    this.grabBody();
+    this.grab = { atoms: atoms, body: [], hx: x, hy: y, vhx: 0, vhy: 0, ox: cx - x, oy: cy - y, t: this.time, vx: 0, vy: 0, bvx: 0, bvy: 0 };
+    this.held.fill(0);
+    for (const j of atoms) this.held[j] = 1;
+    const b = this.grabBody(); this.grab.ox = b[1] - x; this.grab.oy = b[2] - y;
+    this.updateCarried();
     return atoms.length;
-  };
-  // The body the hand carries: the patch, the atoms bonded to it, and every solid atom in contact
-  // with a solid atom of the body (flood fill through the lump). A liquid adds nothing beyond the
-  // patch's own molecules. Refreshed while held, as the lump freezes or melts.
-  S.grabBody = function () {
-    const g = this.grab, MB = P.MAXB, held = this.held, body = [], self = this, x = this.x, y = this.y, el = this.el;
-    const was = this._wasHeld || (this._wasHeld = new Uint8Array(P.MAX));
-    was.set(held.subarray(0, this.n));
-    held.fill(0);
-    // part of the lump: solid, or packed against it and below its melting point by its own
-    // temperature (the vapour a moving lump stirs up can make the region around it read hot, but
-    // that does not melt a solid); an atom already held needs only the temperature
-    const solid = function (i) {
-      if (self.isSolidAtom(i)) return true;
-      if (!was[i] && self.condF[i] <= 0.5) return false;
-      const T = self.tSelf[i], z = el[i];
-      if (isMetal[z] && self.nb[i] === 0) return T < meltK[z];
-      const m = self.solidT[i] || self.meltT[i];
-      return m > 0 && T < m;
-    };
-    this.buildGrid();
-    const add = function (i) { if (!held[i]) { held[i] = 1; body.push(i); } };
-    for (const i of g.patch) add(i);
-    const grains = new Uint8Array(this.grains.length);
-    for (let h = 0; h < body.length; h++) {
-      const a = body[h];
-      for (let k = 0; k < this.nb[a]; k++) add(this.bp[a * MB + k]);
-      // a crystal grain comes along whole
-      const gi = this.grainOf[a];
-      if (gi >= 0 && !grains[gi]) { grains[gi] = 1; for (const u of this.grains[gi].mem) for (const i of u.atoms) add(i); }
-      // the patch itself reaches into the lump even where its surface is loose
-      if (h >= g.patch.length && !solid(a)) continue;
-      this.query(x[a], y[a], 1.3 * (radius[el[a]] + P.SOLID_A / 2), function (j) {
-        if (held[j]) return;
-        const r = 1.3 * pairSigma[el[a] * NZ + el[j]];
-        if ((x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 < r * r && solid(j)) add(j);
-      });
-    }
-    g.atoms = body;
   };
   S.grabMove = function (x, y) {
     const g = this.grab;
@@ -3038,44 +2972,92 @@
     g.vhx += 0.5 * ((x - g.hx) / dtw - g.vhx); g.vhy += 0.5 * ((y - g.hy) / dtw - g.vhy);
     g.hx = x; g.hy = y; g.t = this.time;
   };
-  S.grabEnd = function () { this.grab = null; this.held.fill(0); };
+  S.grabEnd = function () { this.grab = null; this.held.fill(0); this.carried.fill(0); };
+  // The solid body the held patch belongs to: solid atoms in contact with it, and with each other.
+  // (A liquid is not carried: it hangs from the hand by its own cohesion, and drips.)
+  S.updateCarried = function () {
+    const n = this.n, carried = this.carried, el = this.el, x = this.x, y = this.y, self = this;
+    const before = this.grabBody();
+    carried.fill(0, 0, n);
+    const queue = [], body = [];
+    for (const i of this.grab.atoms) if (this.isSolidAtom(i)) { carried[i] = 1; queue.push(i); }
+    while (queue.length) {
+      const i = queue.pop();
+      body.push(i);
+      this.query(x[i], y[i], this.cellSize, function (j, d) {
+        if (carried[j] || d > 1.3 * pairSigma[el[i] * NZ + el[j]] || !self.isSolidAtom(j)) return;
+        carried[j] = 1; queue.push(j);
+      });
+    }
+    this.grab.body = body;
+    // the hand holds the body where it is: a change in what hangs from it is not a pull
+    const after = this.grabBody();
+    if (before[0] && after[0]) { this.grab.ox += after[1] - before[1]; this.grab.oy += after[2] - before[2]; }
+  };
+  // The hand steers what it holds (critically damped, at most GRAB_MAX_ACCEL and GRAB_MAX_SPEED).
+  // A solid it holds moves as a whole: the push is shared over the body's atoms like its
+  // weight, as it effectively is for anything this small (a real hand accelerates a lump a few
+  // nanometres across far too gently to strain its bonds; on this scale its motion is ~1e13
+  // times harsher, and pulling a lump along by one patch would stretch it plastically and heat
+  // it). The push depends only on the motion of the body as a whole, so it neither heats nor
+  // cools it, nor stops its atoms moving; and once let go, or when it hits something, nothing but
+  // its own bonds holds it together. A liquid has no such body: the hand drags the patch alone,
+  // and the liquid comes along only as far as its own cohesion carries it.
   S.grabForces = function () {
-    const g = this.grab;
-    if (this.substep % 16 === 0) this.grabBody();
-    const A = g.atoms, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
-    if (this.time - g.t > 0.05) { g.vhx *= 0.9; g.vhy *= 0.9; } // the hand has stopped
-    // the spring pulls the patch to the hand; the damping and the pull act on the whole body
-    let M = 0, vx = 0, vy = 0, Mp = 0, cx = 0, cy = 0;
+    const g = this.grab, A = g.atoms, x = this.x, y = this.y, px = this.px, py = this.py, el = this.el;
+    if (this.time - g.t > 0.05) { const f = Math.pow(0.9, P.DT / P.DT_REF); g.vhx *= f; g.vhy *= f; } // the hand has stopped
+    let M = 0, vx = 0, vy = 0;
     for (let k = 0; k < A.length; k++) {
       const i = A[k], m = mass[el[i]];
       M += m; vx += m * (x[i] - px[i]); vy += m * (y[i] - py[i]);
     }
-    for (const i of g.patch) { const m = mass[el[i]]; Mp += m; cx += m * x[i]; cy += m * y[i]; }
-    if (!M || !Mp) return;
-    cx /= Mp; cy /= Mp;
-    g.vx = vx / M; g.vy = vy / M; // the held body's velocity, per substep (for the thermostats)
-    vx /= M * P.DT; vy /= M * P.DT;
+    if (!M) return;
+    g.vx = vx / M; g.vy = vy / M; // the held patch's velocity, per substep (for the thermostats)
+    const b = this.grabBody();
+    g.bvx = b[3]; g.bvy = b[4]; // ...and the body's
+    const bvx = b[3] / P.DT, bvy = b[4] / P.DT;
     const w = P.GRAB_OMEGA;
-    let ax = w * w * (g.hx + g.ox - cx) - 2 * w * (vx - g.vhx);
-    let ay = w * w * (g.hy + g.oy - cy) - 2 * w * (vy - g.vhy);
+    let ax = w * w * (g.hx + g.ox - b[1]) - 2 * w * (bvx - g.vhx);
+    let ay = w * w * (g.hy + g.oy - b[2]) - 2 * w * (bvy - g.vhy);
+    const nvx = bvx + ax * P.DT, nvy = bvy + ay * P.DT, nv = Math.hypot(nvx, nvy);
+    if (nv > P.GRAB_MAX_SPEED) {
+      const f = P.GRAB_MAX_SPEED / nv;
+      ax = (nvx * f - bvx) / P.DT; ay = (nvy * f - bvy) / P.DT;
+    }
     const a = Math.hypot(ax, ay);
     if (a > P.GRAB_MAX_ACCEL) { ax *= P.GRAB_MAX_ACCEL / a; ay *= P.GRAB_MAX_ACCEL / a; }
-    for (let k = 0; k < A.length; k++) {
-      const i = A[k], m = mass[el[i]];
+    const set = g.body.length ? g.body : A;
+    for (let k = 0; k < set.length; k++) {
+      const i = set[k];
+      if (i >= this.n) continue;
+      const m = mass[el[i]];
       this.fx[i] += m * ax; this.fy[i] += m * ay;
     }
+  };
+  // mass, centre and velocity (per substep) of what the hand steers: the body, or the patch
+  S.grabBody = function () {
+    const g = this.grab, set = g.body.length ? g.body : g.atoms, el = this.el;
+    let M = 0, cx = 0, cy = 0, vx = 0, vy = 0;
+    for (const i of set) {
+      if (i >= this.n) continue;
+      const m = mass[el[i]];
+      M += m; cx += m * this.x[i]; cy += m * this.y[i]; vx += m * (this.x[i] - this.px[i]); vy += m * (this.y[i] - this.py[i]);
+    }
+    return M ? [M, cx / M, cy / M, vx / M, vy / M] : [0, 0, 0, 0, 0];
   };
   // particle `from` moved into slot `to` (to is being removed and from is the last one)
   S.grabRenumber = function (to, from) {
     this.held[to] = this.held[from]; this.held[from] = 0;
-    for (const A of [this.grab.atoms, this.grab.patch]) {
+    this.carried[to] = this.carried[from]; this.carried[from] = 0;
+    for (const A of [this.grab.atoms, this.grab.body]) {
       const k = A.indexOf(to);
       if (k >= 0) { A[k] = A[A.length - 1]; A.pop(); }
       const m = A.indexOf(from);
       if (m >= 0) A[m] = to;
     }
-    if (!this.grab.patch.length) this.grabEnd();
+    if (!this.grab.atoms.length) this.grabEnd();
   };
+
 
   S.updateGauges = function (elapsed) {
     if (this.vacuumOn && elapsed > 0) this.pump(elapsed);
