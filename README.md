@@ -13,7 +13,8 @@ Real world** buttons at the top left, or just scroll):
   Clicking adds material by the mole.
 - **Real world:** the jar as you would see it: water as a translucent blue pool with a bright
   surface, metals as grey lumps, sulfur yellow, salt white, rust red-brown, and coloured gases
-  (chlorine, bromine, iodine, NO₂) as a tinted haze, while colourless gases stay clear. Clicking
+  (chlorine, bromine, iodine, NO₂) as a tinted haze, while colourless gases stay clear. Hot
+  liquids and solids glow: dull red from about 800 K, orange to yellow-white when molten. Clicking
   adds moles here too.
 
 Liquids fall under gravity, land in a pool and spread out; solids (metals below their melting
@@ -30,6 +31,7 @@ Tests run under Node (no packages needed):
 
 ```sh
 npm test
+TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 ```
 
 ## Controls
@@ -46,7 +48,7 @@ npm test
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag: the hand holds only what is under the cursor, and the rest follows through its own bonds. A solid metal lump comes up whole and survives being thrown at the glass, because its lattice is strong; a melt stretches, necks and drips; a gas slips away |
+| Grab | Grab tool, then press on material and drag: the hand closes on what is under the cursor and, if that is solid, on the whole solid object it belongs to (a lump of metal, salt, graphite, iodine or ice), which comes up whole and survives being thrown at the glass; a liquid stretches, necks and drips, because the hand holds only the patch it touches; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -103,12 +105,22 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   - alkali and alkaline-earth metals react by electron transfer, with almost no barrier
     beyond the reaction enthalpy (sodium in water),
   - four-centre exchange AB + CD → AC + BD (largely forbidden, so it needs high temperature),
+    and its one-bond variant AB + CD → AC + B + D, an abstraction by a molecule, with the
+    abstraction barrier (it starts the dark explosion of H₂ + F₂; with Cl₂ or O₂ it is far uphill),
   - thermal dissociation of the weakest bond unit, and pi bonds forming between radicals.
+
+  Carbon monoxide is a closed-shell molecule (its carbon's spare valence is a lone pair, not an
+  unpaired electron), so CO does not stick to other CO; radicals still add to it (O + CO → CO₂).
+  Oxygen does not grow O–O–O chains on molecules that hold other elements (H₂O₃ and longer
+  polyoxides fall apart far below room temperature); pure oxygen still makes ozone.
 
   Activation energy follows an Evans–Polanyi-style rule: a fraction of the energy of the bonds
   being broken plus any endothermicity. Triplet O₂ gets an extra spin barrier against
   closed-shell molecules and metal surfaces, which is why fuels and iron sit happily in oxygen
-  until you heat or spark them, while radicals react with it readily.
+  until you heat or spark them, while radicals react with it readily. A halogen splitting on a
+  metal that does not react by electron transfer (iron, copper, aluminium) meets an extra barrier
+  for breaking through its own halide layer, so iron burns in chlorine only once heated (about
+  500 K), while sodium reacts at once.
 - **Energy is conserved.** Reaction enthalpy goes into (or comes out of) the atoms' kinetic
   energy, so exothermic reactions heat the jar and flames are hot. Changes in the atoms'
   non-bonded interactions during a reaction are accounted for too. The heat is shared with the
@@ -159,7 +171,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   while a hard enough blow still yields it. Grains of a metal that touch are welded into one
   solid, since real grain boundaries are nearly as strong as the crystals. Heat shakes the atoms
   against their springs, and past the melting point the crystal lets go of them. Ice grains are spaced so that ice takes up
-  about 7% more room than the liquid (real ice: 9%), so water swells as it freezes.
+  about 7% more room than the liquid (real ice: 9%), so water swells as it freezes. Every other
+  solid (salts and oxides, and molecular solids such as iodine or sulfur rings below their melting
+  point) is held the same way, by saturating springs to the place each atom had when it joined
+  (an amorphous template rather than an ideal lattice), and lets go of them at its real melting
+  point (NaCl 1074 K, MgO 3098 K, FeCl₃ 579 K...). Covalent networks such as graphite and
+  silicon are held by their own bonds. A member melts when it is hot itself, not merely when the
+  gas around it is.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
   solid (below its documented melting point) also make occasional small trial turns and shifts,
@@ -168,6 +186,11 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   frost growing from vapour, settles into ordered rows instead of a frozen glass. The same
   melting points mark frozen molecular solids as solids for the settling force, so ice is not
   squashed like a liquid.
+- **Temperature** is the kinetic energy over the degrees of freedom actually left: each rigid
+  bond removes one of an atom's two, and in a covalent network rings and stiff bond angles lock
+  up about half of what remains, so a lump of graphite on a hot plate reads the plate's
+  temperature (and can burn). Where liquid or solid shares a region with gas, the few gas
+  molecules barely count, since they hold very little heat next to condensed matter.
 - **Heat flow in gas.** Simulated gas molecules collide only a few times per simulated second,
   far too rarely to carry heat across the jar, so hot gas also passes heat to the cooler gas next
   to it (energy conserving). This is what lets a flame front run through a whole mixture.
@@ -179,8 +202,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   off exponentially); liquids stay until they evaporate. The gas can injects gas through the valve.
 - **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
   a strong settling force only to material that is clearly packed (liquids and solids); gas
-  molecules feel almost none, so vapour still fills the jar. Falling material has a speed limit
-  that drops near the floor, so it lands without heating up. The glass walls and floor attract
+  molecules feel almost none, so vapour still fills the jar. Falling or thrown material has a
+  speed limit that drops as it nears the floor or the glass (only for the motion toward them), so
+  it lands softly instead of heating up or shattering: the fastest flow is only a few centimetres
+  per second in the real-world jar. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
@@ -199,19 +224,25 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - Superheavy elements have estimated electronegativities (from the element above them) and
   predicted or unknown melting and boiling points.
 - Metal cohesion is calibrated on the melting point, so metals boil in the right order but
-  low-melting metals boil too early (gallium well below its real 2477 K), and a molten metal
+  low-melting metals boil too early (gallium well below its real 2673 K), and a molten metal
   shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
 - Evaporation rises too gently with temperature: in an insulated jar a small amount of water is
   about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
   450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
   sharp boiling point; a hot plate well above the boiling point drives them off.
 - Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
-  (spark) → HCl, Na + Cl₂ → solid NaCl, metals burning to their oxides (MgO, Al₂O₃, iron's Fe₂O₃
-  and Fe₃O₄, CuO), wet iron corroding to hydroxides, no ammonia from N₂ + H₂ without a catalyst.
-  Still poorly reproduced: hydrocarbon flames stop at peroxides and alcohols instead of going all
-  the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled), solid
-  carbon and sulfur hardly burn, hydrogen peroxide does not decompose on heating, and sodium
-  reacts with water only at its surface and slowly.
+  (spark) → HCl, H₂ + F₂ exploding without a spark, Na + Cl₂ → solid NaCl, metals burning to
+  their oxides (MgO, Al₂O₃, iron's Fe₂O₃ and Fe₃O₄, CuO), iron in hot steam releasing hydrogen,
+  iron burning in chlorine only when heated, gold untouched by hot oxygen, CO stable, hot
+  hydrogen peroxide decomposing to water and oxygen, no ammonia from N₂ + H₂ without a catalyst.
+  Still poorly reproduced: hydrocarbon flames stop at peroxyacids and polymers instead of going
+  all the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled),
+  sodium reacts with water only at its surface and slowly, and with no ions in solution there is
+  no neutralisation and no NH₄Cl. Rusting at room temperature (electrochemical, over days) does
+  not happen. See `Known_Issues.md` for the full list.
+- Grabbing and throwing: metals, salts, graphite, silicon and ice come up whole; ice, sulfur and
+  oxides can still crack when thrown hard, and iodine and gallium (both close to their limits in
+  this model) fall apart. Silicon, almost fully rigid in 2D, reads too cold.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

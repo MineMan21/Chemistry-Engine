@@ -151,7 +151,7 @@ test('liquid water falls under gravity and wets the glass', function () {
   // a thin film placed against the glass stays there
   const film = newSim(11);
   film.react = function () {}; film.bondEvents = function () {};
-  const placed = film.addMolecules(H2O, 200, 30, P.H * 0.35, { x: 18, y: 600 });
+  const placed = film.addMolecules(H2O, 200, 30, P.H * 0.35, { x: 18, y: 600, fixed: true });
   run(film, 3);
   let atWall = 0;
   for (let i = 0; i < film.n; i++) if (film.el[i] === 8 && film.x[i] < 60 && film.y[i] < P.H * 0.6) atWall++;
@@ -339,11 +339,12 @@ function ironLump(seed) {
 test('solid iron is strong: grabbed by a small patch the whole lump comes along', function () {
   const L = ironLump(24), sim = L.sim;
   const held = sim.grabStart(L.cx, L.top + 20, 120);
-  assert.ok(held < 0.2 * sim.n, 'only a patch is held (' + held + ' of ' + sim.n + ')');
+  assert.ok(held < 0.2 * sim.n, 'only a patch is under the cursor (' + held + ' of ' + sim.n + ')');
+  const y0 = Array.from(sim.y.subarray(0, sim.n));
   const steps = Math.round(2 / P.DT);
   for (let s = 0; s < steps; s += 6) { sim.grabMove(L.cx, L.top + 20 - 700 * Math.min(1, s / (0.75 * steps))); sim.step(6); }
-  let lifted = 0;
-  for (let i = 0; i < sim.n; i++) if (sim.y[i] < L.top - 300) lifted++;
+  let lifted = 0; // atoms that rose with the hand (it rose 700)
+  for (let i = 0; i < sim.n; i++) if (sim.y[i] < y0[i] - 500) lifted++;
   assert.ok(lifted > 0.85 * sim.n, 'the lump came up with the patch: ' + lifted + ' of ' + sim.n);
   assert.ok(L.broken() < 0.03 * L.pairs.length, 'the lattice held: ' + L.broken() + ' of ' + L.pairs.length + ' contacts broken');
   sim.grabEnd();
@@ -426,13 +427,15 @@ test('iron is untouched by oxygen at room temperature and oxidises to Fe2O3/Fe3O
   assert.ok(peroxide === 0, 'no iron peroxides or superoxides: ' + peroxide + ' O-O bonds on iron');
 });
 
-test('wet iron rusts to hydroxides and oxides, not iron hydrides', function () {
+// Rusting at room temperature is electrochemical and takes days; in seconds, iron and water react
+// only hot, as in the steam-iron process (3 Fe + 4 H2O -> Fe3O4 + 4 H2 above about 840 K)
+test('iron in hot steam and air oxidises (releasing hydrogen), not to iron hydrides', function () {
   const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
   const fe = Z('Fe'), o = Z('O');
   const sim = newSim(33);
   sim.addMoles(fe, 0.2, P.W / 2, P.H - 150); sim.addMoles(o, 0.2, P.W / 2, P.H * 0.4);
   sim.addMolecules(H2O, 200, P.W / 2, P.H - 400, { x: 300, y: 100 });
-  sim.plateTemp = 350;
+  sim.plateTemp = 1000;
   run(sim, 15);
   const hydride = speciesWith(sim, function (k) { return k[fe] && k[1] && !k[o]; });
   assert.ok(hydride.length === 0, 'no iron hydrides: ' + hydride.map(function (s) { return s.key; }).join(' '));
@@ -440,7 +443,8 @@ test('wet iron rusts to hydroxides and oxides, not iron hydrides', function () {
     if (sim.el[i] !== fe) continue;
     for (let k = 0; k < sim.nb[i]; k++) assert.ok(sim.el[sim.bp[i * P.MAXB + k]] !== 1, 'no Fe-H bond');
   }
-  assert.ok(compound(sim, fe, o).reacted > 0.02, 'iron corrodes in wet air: ' + JSON.stringify(compound(sim, fe, o)));
+  assert.ok(compound(sim, fe, o).reacted > 0.02, 'iron oxidises in hot steam: ' + JSON.stringify(compound(sim, fe, o)));
+  assert.ok(mol(sim, 'H2') > 0.002, 'hydrogen is released: ' + mol(sim, 'H2').toFixed(3) + ' mol');
 });
 
 test('magnesium and aluminium burn to MgO and Al2O3', function () {
@@ -488,6 +492,133 @@ test('hydrogen and chlorine stay apart until sparked, then make HCl; N2 + H2 nee
   assert.ok(mol(haber, 'H3N') < 0.005, 'no ammonia without a catalyst');
 });
 
+// ---- solids, temperature and bookkeeping ------------------------------------------------
+// a lump of `z` (or of the given template) settled on the floor, lifted by a patch at its top and
+// thrown at the left wall: returns the share of the lump that rose with the hand and the share in
+// its largest piece afterwards
+function liftAndThrow(seed, setup) {
+  const sim = newSim(seed);
+  setup(sim);
+  run(sim, 6);
+  const lump = [];
+  for (let i = 0; i < sim.n; i++) if (sim.condF[i] > 0.5 || sim.isSolidAtom(i)) lump.push(i);
+  let top = P.H, cx = 0;
+  lump.forEach(function (i) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / lump.length; });
+  const y0 = lump.map(function (i) { return sim.y[i]; });
+  sim.grabStart(cx, top + 20, 120);
+  let steps = Math.round(1.5 / P.DT);
+  for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 20 - 700 * Math.min(1, s / (0.75 * steps))); sim.step(6); }
+  let rose = 0;
+  lump.forEach(function (i, k) { if (sim.y[i] < y0[k] - 500) rose++; });
+  steps = Math.round(0.4 / P.DT);
+  for (let s = 0; s < steps; s += 6) { sim.grabMove(cx - (cx - 300) * s / steps, top - 680); sim.step(6); }
+  sim.grabEnd();
+  run(sim, 3);
+  // largest piece: atoms within 1.4 contact distances (or bonded) of each other
+  const parent = new Int32Array(sim.n);
+  for (let i = 0; i < sim.n; i++) parent[i] = i;
+  const find = function (a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  lump.forEach(function (i) {
+    lump.forEach(function (j) {
+      if (j <= i) return;
+      const d = Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]);
+      if (d < 1.4 * (CE.elements[sim.el[i]].radius + CE.elements[sim.el[j]].radius)) parent[find(i)] = find(j);
+    });
+  });
+  const size = new Map();
+  lump.forEach(function (i) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); });
+  return { rose: rose / lump.length, piece: Math.max.apply(null, Array.from(size.values())) / lump.length };
+}
+
+test('lumps of lead and graphite come up whole when grabbed and survive a throw', function () {
+  const lead = liftAndThrow(40, function (sim) { sim.addMoles(Z('Pb'), 0.3, P.W / 2, P.H - 150); });
+  assert.ok(lead.rose > 0.85 && lead.piece > 0.85, 'lead: ' + JSON.stringify(lead));
+  const graphite = liftAndThrow(41, function (sim) { sim.addMoles(Z('C'), 0.3, P.W / 2, P.H - 150); });
+  assert.ok(graphite.rose > 0.85 && graphite.piece > 0.85, 'graphite: ' + JSON.stringify(graphite));
+});
+
+test('graphite on a hot plate reads the plate temperature', function () {
+  const sim = newSim(42);
+  sim.insulated = true;
+  sim.addMoles(Z('C'), 0.3, P.W / 2, P.H - 200);
+  sim.plateTemp = 800;
+  run(sim, 15);
+  assert.ok(sim.temperature > 500 && sim.temperature < 1100, 'graphite at ' + Math.round(sim.temperature) + ' K on an 800 K plate');
+});
+
+test('freshly added molecules start near room temperature', function () {
+  const CO2 = { atoms: [[6, 0, 0], [8, 12.4, 0], [8, -12.4, 0]], bonds: [[0, 1, 2], [0, 2, 2]] };
+  const EtOH = { atoms: [[6, 0, 0], [6, 15.2, 0], [8, 15.2, -14.2], [1, 24.9, -14.2], [1, 0, -10.7], [1, 0, 10.7],
+    [1, -10.7, 0], [1, 15.2, 10.7], [1, 25.9, 0]],
+    bonds: [[0, 1, 1], [1, 2, 1], [2, 3, 1], [0, 4, 1], [0, 5, 1], [0, 6, 1], [1, 7, 1], [1, 8, 1]] };
+  [[CO2, 500], [EtOH, 300]].forEach(function (c, k) {
+    const sim = newSim(43 + k);
+    sim.react = function () {}; sim.bondEvents = function () {};
+    const added = sim.addMolecules(c[0], c[1], P.W / 2, P.H - 250, { x: 400, y: 250 });
+    assert.strictEqual(added, c[1], 'all ' + c[1] + ' molecules placed');
+    let hottest = 0;
+    for (let s = 0; s < 60; s += 6) { sim.step(6); for (let i = 0; i < sim.n; i++) hottest = Math.max(hottest, sim.tLoc[i]); }
+    assert.ok(hottest < 1500, 'no overlap flash: hottest spot ' + Math.round(hottest) + ' K');
+  });
+});
+
+test('carbon monoxide and gold are stable; iron needs heat to burn in chlorine; H2 + F2 explodes in the dark', function () {
+  const CO = { atoms: [[6, 0, 0], [8, 11.2, 0]], bonds: [[0, 1, 3]] };
+  const co = newSim(45);
+  co.addMolecules(CO, 300, P.W / 2, P.H / 2, { x: 900, y: 1200 });
+  run(co, 6);
+  assert.ok(mol(co, 'CO') > 0.29, 'CO does not polymerise: ' + mol(co, 'CO').toFixed(3) + ' mol left');
+  const au = newSim(46);
+  au.addMoles(Z('Au'), 0.3, P.W / 2, P.H - 150); au.addMoles(Z('O'), 0.3, P.W / 2, P.H * 0.4);
+  au.plateTemp = 900;
+  run(au, 8);
+  assert.ok(compound(au, Z('Au'), Z('O')).reacted < 0.01, 'gold does not oxidise: ' + JSON.stringify(compound(au, Z('Au'), Z('O'))));
+  const fe = newSim(47);
+  fe.addMoles(Z('Fe'), 0.3, P.W / 2, P.H - 150); fe.addMoles(Z('Cl'), 0.4, P.W / 2, P.H * 0.4);
+  run(fe, 6);
+  assert.ok(compound(fe, Z('Fe'), Z('Cl')).reacted < 0.03, 'iron is untouched by chlorine at room temperature: ' + JSON.stringify(compound(fe, Z('Fe'), Z('Cl'))));
+  fe.plateTemp = 700;
+  run(fe, 10);
+  assert.ok(compound(fe, Z('Fe'), Z('Cl')).reacted > 0.05, 'hot iron burns in chlorine: ' + JSON.stringify(compound(fe, Z('Fe'), Z('Cl'))));
+  const hf = newSim(48);
+  hf.addMoles(Z('H'), 0.3, P.W / 2, P.H * 0.4); hf.addMoles(Z('F'), 0.3, P.W / 2, P.H * 0.6);
+  run(hf, 6);
+  assert.ok(mol(hf, 'FH') > 0.2, 'H2 + F2 reacts without a spark: ' + mol(hf, 'FH').toFixed(3) + ' mol HF');
+});
+
+// (pure peroxide vapour needs about 200 kJ/mol to split; below its boiling point it lasts, and the
+// quick decomposition seen in practice is catalysed by surfaces and traces of metal)
+test('hot hydrogen peroxide decomposes to water and oxygen, without O-O-O chains', function () {
+  const H2O2 = { atoms: [[1, -3, -9.2], [8, 0, 0], [8, 14.2, 0], [1, 17.2, 9.2]], bonds: [[0, 1, 1], [1, 2, 1], [2, 3, 1]] };
+  const sim = newSim(49);
+  sim.addMolecules(H2O2, 300, P.W / 2, P.H - 250, { x: 400, y: 250 });
+  sim.plateTemp = 750;
+  run(sim, 15);
+  assert.ok(mol(sim, 'H2O') > 0.1 && mol(sim, 'O2') > 0.03, 'water and oxygen: ' + mol(sim, 'H2O').toFixed(3) + ' / ' + mol(sim, 'O2').toFixed(3));
+  // (HO3 is a real, short-lived radical, made from ozone; H2O3 and longer chains are not)
+  const chains = speciesWith(sim, function (k) { return k[8] >= 3 && k[1] >= 2; });
+  assert.ok(chains.reduce(function (a, s) { return a + s.mol; }, 0) < 0.005, 'no polyoxides: ' + chains.map(function (s) { return s.key; }).join(' '));
+});
+
+test('the gauge reads no vapour over a non-volatile solid, and a lump with a stray atom keeps its amount', function () {
+  const sim = newSim(50);
+  sim.plateTemp = 280;
+  sim.addMoles(Z('Ga'), 0.5, P.W / 2, P.H - 150);
+  run(sim, 6);
+  assert.ok(sim.gasPressure() < 0.01, 'gallium vapour reads ' + sim.gasPressure().toFixed(3) + ' atm');
+  const c = newSim(51);
+  c.addMoles(Z('C'), 0.3, P.W / 2, P.H - 150);
+  run(c, 2);
+  // stick one oxygen atom onto an edge carbon of the graphite
+  let edge = -1;
+  for (let i = 0; i < c.n && edge < 0; i++) if (c.nb[i] >= 2 && c.canAccept(i, Z('O'))) edge = i;
+  assert.ok(edge >= 0, 'graphite has an edge carbon with a free valence');
+  const o = c.addAtom(Z('O'), c.x[edge], c.y[edge] - 14);
+  c.addBond(edge, o, 1, C.bondClass(Z('C'), Z('O')));
+  const net = c.analyze().find(function (s) { return s.key.slice(-2) === ')n'; });
+  assert.ok(net && net.mol > 0.25, 'the lump still counts about 0.3 mol: ' + (net ? net.key + ' ' + net.mol.toFixed(3) : 'none'));
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);
@@ -504,7 +635,10 @@ test('removing particles keeps bonds consistent', function () {
 (function main() {
   let failed = 0;
   const t0 = Date.now();
-  tests.forEach(function (t) {
+  // TEST_FILTER=text runs only the tests whose name contains it
+  const only = process.env.TEST_FILTER;
+  const run = only ? tests.filter(function (t) { return t.name.indexOf(only) >= 0; }) : tests;
+  run.forEach(function (t) {
     const s = Date.now();
     try {
       t.fn();
@@ -514,6 +648,6 @@ test('removing particles keeps bonds consistent', function () {
       console.log('  FAIL ' + t.name + '\n       ' + (e && e.message));
     }
   });
-  console.log((tests.length - failed) + '/' + tests.length + ' passed in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s');
+  console.log((run.length - failed) + '/' + run.length + ' passed in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s');
   process.exit(failed ? 1 : 0);
 })();

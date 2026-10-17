@@ -324,7 +324,7 @@
       const ch = [];
       for (let k = 0; k < 11; k++) ch.push(new Float32Array(N));
       const prev = [];
-      for (let k = 0; k < 10; k++) prev.push(new Float32Array(N));
+      for (let k = 0; k < 11; k++) prev.push(new Float32Array(N));
       this._rg = { N: N, ch: ch, prev: prev, fresh: true, tmp: new Float32Array(N) };
       this.realCanvas = document.createElement('canvas');
       this.realCanvas.width = gw; this.realCanvas.height = gh;
@@ -334,7 +334,8 @@
     // channels: 0 density, 1-3 colour, 4 opacity, 5 solid, 6 gas strength, 7-9 gas colour, 10 heat
     const ch = this._rg.ch;
     for (let k = 0; k < 11; k++) ch[k].fill(0);
-    const [dens, cr, cg, cb, cop, csol, ga, gr, gg, gb] = ch;
+    const [dens, cr, cg, cb, cop, csol, ga, gr, gg, gb, heat] = ch;
+    const tLoc = sim.tLoc;
     const species = sim.species || [], spIdx = sim.spIdx, x = sim.x, y = sim.y, el = sim.el;
     const area = 1 / (cw * cw);
     const condF = sim.condF;
@@ -369,6 +370,7 @@
           dens[cc] += m;
           cr[cc] += look.rgb[0] * m; cg[cc] += look.rgb[1] * m; cb[cc] += look.rgb[2] * m;
           cop[cc] += look.opacity * m; csol[cc] += sol * m;
+          heat[cc] += tLoc[i] * m;
         }
         if (wg > 0) {
           const g = wg * f;
@@ -379,12 +381,13 @@
     // blur about one atom diameter, so packed atoms (metals sit ~36 units apart) read as one piece
     const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(3, Math.round(160 / cw));
     for (let k = 0; k <= 5; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
+    boxBlur(heat, gw, gh, R0, this._rg.tmp); boxBlur(heat, gw, gh, R0, this._rg.tmp);
     for (let k = 6; k <= 9; k++) { boxBlur(ch[k], gw, gh, RG, this._rg.tmp); boxBlur(ch[k], gw, gh, RG, this._rg.tmp); }
     // ease toward this frame's picture (time constant ~0.12 s)
     const prev = this._rg.prev;
     const ease = this._rg.fresh ? 1 : 1 - Math.exp(-(dt || 0.016) / 0.12);
     this._rg.fresh = false;
-    for (let k = 0; k < 10; k++) {
+    for (let k = 0; k < 11; k++) {
       const a = ch[k], b = prev[k];
       for (let c = 0; c < N; c++) { b[c] += ease * (a[c] - b[c]); a[c] = b[c]; }
     }
@@ -412,6 +415,13 @@
           const lift = (0.7 - 0.5 * sf) * edge;
           if (lift > 0) { r += (255 - r) * lift; g += (255 - g) * lift; b += (255 - b) * lift; a = Math.min(1, a + 0.45 * lift); }
           else { r *= 1 + lift * 0.35; g *= 1 + lift * 0.35; b *= 1 + lift * 0.35; }
+          // hot matter glows: dull red from about 800 K (the Draper point), orange-white when molten
+          const glow = incandescence(heat[c] / d);
+          if (glow) {
+            const k = glow[3];
+            r += (glow[0] - r) * k; g += (glow[1] - g) * k; b += (glow[2] - b) * k;
+            a += (1 - a) * k;
+          }
           // composite the material over the gas
           const outA = a + A * (1 - a);
           if (outA > 0) {
@@ -464,6 +474,19 @@
     ctx.beginPath(); ctx.arc(cx, cy, 3.5 * px, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   };
+
+  // Colour and strength of the thermal glow of condensed matter at temperature T (K): a
+  // black-body ramp from dark red through orange to yellow-white, or null when it is too cool
+  // to be seen glowing in a lit room.
+  const GLOW = [[800, 110, 10, 0], [1000, 190, 35, 0], [1300, 255, 95, 10], [1700, 255, 165, 55],
+    [2200, 255, 210, 130], [3200, 255, 240, 215]];
+  function incandescence(T) {
+    if (!(T > GLOW[0][0])) return null;
+    let k = 1;
+    while (k < GLOW.length - 1 && T > GLOW[k][0]) k++;
+    const a = GLOW[k - 1], b = GLOW[k], f = Math.min(1, (T - a[0]) / (b[0] - a[0]));
+    return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f, smooth(800, 1500, T) * 0.9];
+  }
 
   function smooth(a, b, v) {
     const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
