@@ -147,6 +147,7 @@
     T_PRIOR: 2,
     SELF_T_RATE: 0.02, // EMA rate of an atom's own kinetic temperature (per substep)
     SELF_T_WEIGHT: 0.5, // weight of that own temperature in the local temperature // pseudo-count pulling sparse cells toward the jar temperature
+    GAS_T_WEIGHT: 0.1, // weight of gas in the local temperature where liquid or solid is present
     SPAWN_GAP: 0.9, // added molecules start at least this fraction of a contact apart
     MIN_DOF: 0.08, // fewest degrees of freedom counted for an atom of a rigid network (of 2)
     NET_DOF: 0.55, // in a covalent network rings and stiff bond angles lock up about half of what
@@ -1190,7 +1191,12 @@
     const dt = P.DT, dt2 = dt * dt, maxS = P.MAX_STEP;
     const contacts = this.contacts;
     const tgw = this.tgw, tgh = this.tgh, tSum = this.tSum, tCnt = this.tCnt, tCell = this.tCell;
-    tSum.fill(0); tCnt.fill(0);
+    // condensed matter and gas are summed apart: where both share a cell, the few gas molecules
+    // (which hold very little heat next to a liquid or solid) barely move the local temperature
+    // of the condensed matter; a lump swung through vapour does not melt from the vapour it stirs
+    const tSumG = this._tSumG || (this._tSumG = new Float64Array(tSum.length));
+    const tCntG = this._tCntG || (this._tCntG = new Float32Array(tSum.length));
+    tSum.fill(0); tCnt.fill(0); tSumG.fill(0); tCntG.fill(0);
     const cellKE = this.cellKE, cellDebt = this.cellDebt;
     cellKE.fill(0);
     const W = P.W, H = P.H, rng = this.rng, wallG = this.insulated ? 0 : P.WALL_GAMMA;
@@ -1248,27 +1254,35 @@
       this.gAcc[i] = g;
       // cap the local bulk flow speed (not thermal motion) of condensed matter, lower near the
       // floor, so settling liquids/solids land softly instead of heating up on impact
-      let bvx = 0, bvy = 0;
+      let bvx = 0, bvy = 0, noise = -1;
       if (held && held[i]) {
-        // a held body moves as one with the hand: that is its flow, under the same speed limit
-        bvx = grab.vx; bvy = grab.vy;
-        const vb = Math.sqrt(bvx * bvx + bvy * bvy), vmaxB = P.BULK_VMAX * dt;
-        if (vb > vmaxB) { const f = 1 - vmaxB / vb; vx -= bvx * f; vy -= bvy * f; }
-      } else if (c >= 2) {
+        // a held body moves as one with the hand: that is its flow, under the same speed limits
+        bvx = grab.vx; bvy = grab.vy; noise = 0;
+      } else if (c >= 2 || condF[i] > 0.5) {
+        // (packed matter, its surface included: an edge atom of a moving lump moves with it)
         let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
         tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
         tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
         const c3 = (tcy * tgw + tcx) * 3;
         if (mom[c3 + 2] > 0) {
           bvx = mom[c3] / mom[c3 + 2]; bvy = mom[c3 + 1] / mom[c3 + 2];
-          const floorDist = H - y[i];
           // never act on the cell's random thermal drift (~ sqrt(kT / M_cell))
-          const noise = 4 * Math.sqrt(P.KB * this.tLoc[i] / mom[c3 + 2]);
-          // (only on the way down: a lump being lifted off the floor is not held back)
-          const vmaxB = Math.max(noise, floorDist < 250 && bvy > 0 ? P.BULK_VMAX_FLOOR + (P.BULK_VMAX - P.BULK_VMAX_FLOOR) * floorDist / 250 : P.BULK_VMAX) * dt;
-          const vb = Math.sqrt(bvx * bvx + bvy * bvy);
-          if (vb > vmaxB) { const f = 1 - vmaxB / vb; vx -= bvx * f; vy -= bvy * f; }
+          noise = 4 * Math.sqrt(P.KB * this.tLoc[i] / mom[c3 + 2]);
         }
+      }
+      if (noise >= 0) {
+        const vmaxB = Math.max(noise, P.BULK_VMAX) * dt;
+        const vb = Math.sqrt(bvx * bvx + bvy * bvy);
+        if (vb > vmaxB) { const f = 1 - vmaxB / vb; vx -= bvx * f; vy -= bvy * f; bvx *= 1 - f; bvy *= 1 - f; }
+        // approaching the floor or the glass, the flow toward it slows, so dropped or thrown
+        // material lands softly instead of shattering or heating up: at this scale the fastest
+        // flow (BULK_VMAX) is only centimetres per second in the real-world jar
+        const lim = function (dist) { return Math.max(noise, dist < 250 ? P.BULK_VMAX_FLOOR + (P.BULK_VMAX - P.BULK_VMAX_FLOOR) * dist / 250 : P.BULK_VMAX) * dt; };
+        let l;
+        if (bvy > 0 && bvy > (l = lim(H - y[i]))) vy -= bvy - l;
+        else if (bvy < 0 && -bvy > (l = lim(y[i]))) vy += -bvy - l;
+        if (bvx > 0 && bvx > (l = lim(W - x[i]))) vx -= bvx - l;
+        else if (bvx < 0 && -bvx > (l = lim(x[i]))) vx += -bvx - l;
       }
       // soft walls (energy conserving with bond constraints, unlike reflections)
       const rw = radius[el[i]] * 0.6;
@@ -1359,7 +1373,8 @@
       tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
       const tc = tcy * tgw + tcx;
       this.cellOfT[i] = tc;
-      tSum[tc] += tInst; tCnt[tc] += 0.5 * dof;
+      if (contacts[i] < 2 && condF[i] <= 0.5 && !(held && held[i])) { tSumG[tc] += tInst; tCntG[tc] += 0.5 * dof; }
+      else { tSum[tc] += tInst; tCnt[tc] += 0.5 * dof; }
       this.tSelf[i] += P.SELF_T_RATE * (tInst * dofScale - this.tSelf[i]);
       cellKE[tc] += tInst * P.KB;
       ke += tInst;
@@ -1373,18 +1388,19 @@
     const tNew = this._tNew || (this._tNew = new Float32Array(tCell.length));
     for (let cy = 0; cy < tgh; cy++) {
       for (let cx = 0; cx < tgw; cx++) {
-        let sum = 0, cnt = 0;
+        let sum = 0, cnt = 0, sumG = 0, cntG = 0;
         for (let oy = -1; oy <= 1; oy++) {
           const yy = cy + oy;
           if (yy < 0 || yy >= tgh) continue;
           for (let ox = -1; ox <= 1; ox++) {
             const xx = cx + ox;
             if (xx < 0 || xx >= tgw) continue;
-            const w = (ox === 0 && oy === 0) ? 1 : 0.35;
-            sum += tSum[yy * tgw + xx] * w; cnt += tCnt[yy * tgw + xx] * w;
+            const w = (ox === 0 && oy === 0) ? 1 : 0.35, c = yy * tgw + xx;
+            sum += tSum[c] * w; cnt += tCnt[c] * w; sumG += tSumG[c] * w; cntG += tCntG[c] * w;
           }
         }
-        tNew[cy * tgw + cx] = (sum + N0 * globalT) / (cnt + N0);
+        const wg = cnt > 1 ? P.GAS_T_WEIGHT : 1;
+        tNew[cy * tgw + cx] = (sum + wg * sumG + N0 * globalT) / (cnt + wg * cntG + N0);
       }
     }
     for (let c = 0; c < tCell.length; c++) tCell[c] += 0.3 * (tNew[c] - tCell[c]);
@@ -1413,7 +1429,7 @@
       }
       for (let i = 0; i < n; i++) {
         const f = fac[this.cellOfT[i]];
-        if (f !== 1) { px[i] = x[i] - (x[i] - px[i]) * f; py[i] = y[i] - (y[i] - py[i]) * f; }
+        if (f !== 1 && !(held && held[i])) { px[i] = x[i] - (x[i] - px[i]) * f; py[i] = y[i] - (y[i] - py[i]) * f; }
       }
     }
     this.impulse += impulse;
@@ -1466,8 +1482,10 @@
     const gKE = this._gKE, gN = this._gN, gdE = this._gdE;
     gKE.fill(0); gN.fill(0); gdE.fill(0);
     const idt2 = 1 / (P.DT * P.DT);
+    // (a held body is not gas: its motion is the hand's, not heat to pass on)
+    const held = this.grab ? this.held : null;
     for (let i = 0; i < n; i++) {
-      if (condF[i] > 0.5) continue;
+      if (condF[i] > 0.5 || (held && held[i])) continue;
       const vx = x[i] - px[i], vy = y[i] - py[i], c = cellOf[i];
       gKE[c] += 0.5 * mass[el[i]] * (vx * vx + vy * vy) * idt2;
       gN[c]++;
@@ -1493,7 +1511,7 @@
       gdE[c] = ke > 0 && e > 0 ? Math.sqrt(e / ke) : 1; // reuse as the velocity scale
     }
     for (let i = 0; i < n; i++) {
-      if (condF[i] > 0.5) continue;
+      if (condF[i] > 0.5 || (held && held[i])) continue;
       const s = gdE[cellOf[i]];
       if (s === 1) continue;
       px[i] = x[i] - (x[i] - px[i]) * s;
@@ -2924,7 +2942,19 @@
   // patch's own molecules. Refreshed while held, as the lump freezes or melts.
   S.grabBody = function () {
     const g = this.grab, MB = P.MAXB, held = this.held, body = [], self = this, x = this.x, y = this.y, el = this.el;
+    const was = this._wasHeld || (this._wasHeld = new Uint8Array(P.MAX));
+    was.set(held.subarray(0, this.n));
     held.fill(0);
+    // an atom already in the lump stays in it unless it has itself melted: the vapour the lump
+    // stirs up as it moves can read hot around it, but that does not melt a solid
+    const solid = function (i) {
+      if (self.isSolidAtom(i)) return true;
+      if (!was[i]) return false;
+      const T = self.tSelf[i], z = el[i];
+      if (isMetal[z] && self.nb[i] === 0) return T < meltK[z];
+      const m = self.solidT[i] || self.meltT[i];
+      return m > 0 && T < m;
+    };
     this.buildGrid();
     const add = function (i) { if (!held[i]) { held[i] = 1; body.push(i); } };
     for (const i of g.patch) add(i);
@@ -2932,11 +2962,11 @@
       const a = body[h];
       for (let k = 0; k < this.nb[a]; k++) add(this.bp[a * MB + k]);
       // the patch itself reaches into the lump even where its surface is loose
-      if (h >= g.patch.length && !this.isSolidAtom(a)) continue;
+      if (h >= g.patch.length && !solid(a)) continue;
       this.query(x[a], y[a], 1.3 * (radius[el[a]] + P.SOLID_A / 2), function (j) {
         if (held[j]) return;
         const r = 1.3 * pairSigma[el[a] * NZ + el[j]];
-        if ((x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 < r * r && self.isSolidAtom(j)) add(j);
+        if ((x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 < r * r && solid(j)) add(j);
       });
     }
     g.atoms = body;

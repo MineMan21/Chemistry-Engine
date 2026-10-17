@@ -52,7 +52,7 @@
     O3: { name: 'Ozone', Tm: 80.7, Tb: 161.1, Tc: 261.1, Pc: 54.6, hf: 2.1, est: ['Pt'] },
     F6S: { name: 'Sulfur hexafluoride', Tt: 223.5, Pt: 2.23, Tc: 318.7, Pc: 37.1, Ts: 209.4, hf: 5.0 },
     C6H6: { name: 'Benzene', Tt: 278.68, Pt: 0.0472, Tc: 562.0, Pc: 48.3, Tm: 278.68, Tb: 353.2, hf: 9.87 },
-    C2H6O: { name: 'Ethanol', Tt: 150, Pt: 4.3e-9, Tc: 514.0, Pc: 60.6, Tm: 159.0, Tb: 351.4, hf: 4.9 },
+    C2H6O: { name: 'Ethanol', Tt: 159.0, Pt: 4.3e-9, Tc: 514.0, Pc: 60.6, Tm: 159.0, Tb: 351.4, hf: 4.9, est: ['Pt'] },
     CH4O: { name: 'Methanol', Tt: 175.6, Pt: 1.84e-6, Tc: 512.6, Pc: 79.9, Tm: 175.6, Tb: 337.8, hf: 3.22 },
     C2H6: { name: 'Ethane', Tt: 90.35, Pt: 1.1e-5, Tc: 305.32, Pc: 48.2, Tm: 90.35, Tb: 184.6, hf: 2.86 },
     C3H8: { name: 'Propane', Tt: 85.5, Pt: 1.7e-9, Tc: 369.8, Pc: 41.9, Tm: 85.5, Tb: 231.1, hf: 3.52 },
