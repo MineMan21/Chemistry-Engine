@@ -48,7 +48,7 @@ TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 | Spark | Spark tool, then click: a short 4000 K burst over a small spot that also splits some bonds, like an igniter. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
-| Grab | Grab tool, then press on material and drag: the hand closes on what is under the cursor and, if that is solid, on the whole solid object it belongs to (a lump of metal, salt, graphite, iodine or ice), which comes up whole and survives being thrown at the glass; a liquid stretches, necks and drips, because the hand holds only the patch it touches; a gas slips away |
+| Grab | Grab tool, then press on material and drag: the hand takes hold of what is under the cursor. A solid (a lump of metal, salt, graphite or ice) is carried as a whole, its weight and the hand's push shared over all its atoms, so it is neither strained nor warmed by being moved; let go or thrown at the glass, only its own bonds hold it together. A liquid is dragged by the patch under the cursor alone, so it stretches, necks and drips; a gas slips away |
 | Highlight | Click a row in **Contents** to highlight every molecule of that substance in the jar (others fade; in the real-world view each one gets a yellow dot). Click it again or press Esc to clear |
 | Phase diagram | **Phase diagram** under the element or molecule card, or under Contents for a highlighted substance: where it is solid, liquid, gas or supercritical, with the triple and critical points and a ring showing the jar's current temperature and pressure. Hover to read values. Available for about 45 well-documented substances (water, CO₂, N₂, O₂, the halogens and noble gases, mercury, ammonia, methane, simple organics...) |
 | Hot plate | Slider from 20 K to 4000 K (logarithmic) plus presets |
@@ -156,28 +156,27 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   embedded-atom models) rewards each atom for sitting inside dense metal, however that metal is
   packed: crystal and melt gain the same, so it leaves the melting point alone, but a lone atom,
   a small cluster or a froth gains nothing. That is what keeps a liquid metal together far above
-  its melting point; a pair well alone would boil a 2D metal almost as soon as it melted. Iron
-  melts near 1800 K and stays a liquid with almost no vapour to about 2600 K; gallium melts just
-  above 303 K and mercury is liquid at room temperature.
+  its melting point; a pair well alone would boil a 2D metal almost as soon as it melted. The two
+  together give each metal its real cohesive energy (iron 413 kJ/mol, lead 196, tungsten 859),
+  so pulling a lump apart costs what it costs the real metal. Iron
+  is solid at 1600 K and a liquid with almost no vapour at 2000 K, lead melts between 500 and
+  650 K, mercury is liquid at room temperature and gallium at 340 K. Melting in 2D is gradual,
+  and gallium and mercury freeze some way below their real melting points. The pair well alone
+  decides where a metal melts: the many-body term acts only on atoms being pulled out of the
+  metal (a corner atom, one leaving for the vapour, the last threads of a crack), never on the
+  inside of a solid or a melt, so it cannot favour the crystal.
 - **Crystal engine.** Freezing is a nucleation-and-growth process: below its melting point a
   substance that crystallises (water, free metal atoms) starts crystal grains, readily on the cold
   glass and floor and rarely in the bulk, and the grains grow as neighbours join. Each grain keeps
   an ideal lattice (the honeycomb of ice, the close-packed layer of a metal) fitted to its members
-  by a best-fit rotation and shift (shape matching), and gentle conservative spring forces pull
-  members toward their sites. Every join, leave and spring is energy-accounted, and members
-  melt off again when heated past the melting point. Metal crystals are much stiffer (their
-  springs scale with the melting point) and saturate at a yield displacement, so a cold metal is
-  elastic and strong all the time: lifted by one corner or thrown at the glass it holds together,
-  while a hard enough blow still yields it. Grains of a metal that touch are welded into one
-  solid, since real grain boundaries are nearly as strong as the crystals. Heat shakes the atoms
-  against their springs, and past the melting point the crystal lets go of them. Ice grains are spaced so that ice takes up
-  about 7% more room than the liquid (real ice: 9%), so water swells as it freezes. Every other
-  solid (salts and oxides, and molecular solids such as iodine or sulfur rings below their melting
-  point) is held the same way, by saturating springs to the place each atom had when it joined
-  (an amorphous template rather than an ideal lattice), and lets go of them at its real melting
-  point (NaCl 1074 K, MgO 3098 K, FeCl₃ 579 K...). Covalent networks such as graphite and
-  silicon are held by their own bonds. A member melts when it is hot itself, not merely when the
-  gas around it is.
+  by a best-fit rotation and shift (shape matching). In ice, gentle spring forces pull members
+  toward their sites (every join, leave and spring is energy-accounted), and ice grains are
+  spaced so that ice takes up about 7% more room than the liquid (real ice: 9%), so water swells
+  as it freezes. Metal grains carry no springs: a metal orders and holds together by its own
+  cohesion alone, and its grains only keep track of which atoms are crystalline. Salts and oxides
+  are held by their ionic bonds, molecular solids by their own attractions, covalent networks
+  such as graphite and silicon by their bonds. A member melts when it is hot itself, not merely
+  when the gas around it is.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
   solid (below its documented melting point) also make occasional small trial turns and shifts,
@@ -202,10 +201,8 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   off exponentially); liquids stay until they evaporate. The gas can injects gas through the valve.
 - **Gravity and glass.** At a few nanometres real gravity would do nothing, so the engine applies
   a strong settling force only to material that is clearly packed (liquids and solids); gas
-  molecules feel almost none, so vapour still fills the jar. Falling or thrown material has a
-  speed limit that drops as it nears the floor or the glass (only for the motion toward them), so
-  it lands softly instead of heating up or shattering: the fastest flow is only a few centimetres
-  per second in the real-world jar. The glass walls and floor attract
+  molecules feel almost none, so vapour still fills the jar. What the hand holds feels none:
+  the hand carries its weight. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
@@ -240,9 +237,15 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   sodium reacts with water only at its surface and slowly, and with no ions in solution there is
   no neutralisation and no NH₄Cl. Rusting at room temperature (electrochemical, over days) does
   not happen. See `Known_Issues.md` for the full list.
-- Grabbing and throwing: metals, salts, graphite, silicon and ice come up whole; ice, sulfur and
-  oxides can still crack when thrown hard, and iodine and gallium (both close to their limits in
-  this model) fall apart. Silicon, almost fully rigid in 2D, reads too cold.
+- Scale: moved at the speed of a real hand, nothing would visibly move in the time the simulation
+  shows, so the hand moves things at a few times the thermal speed of their atoms, about 10^13
+  times harsher than a real hand. That is why it carries a solid as a whole instead of pulling
+  it along by the patch it touches (which would stretch and warm a lump that real handling never
+  could). A solid thrown at the glass at the hand's top speed hits it at roughly the speed of a
+  rifle bullet, so it warms (metals, salts, MgO and graphite stay whole; sulfur and iodine
+  crumble). Silicon, almost fully rigid in 2D, reads too cold.
+- Integration: a substep of 1 ms is short enough to follow a metal lattice's vibrations, so a
+  lump left alone in an insulated jar keeps its temperature to a couple of kelvin per second.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
   uses the real mass.
 

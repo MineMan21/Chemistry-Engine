@@ -568,7 +568,7 @@
     if (!state.paused && sim.n > 0) {
       // adaptive sub-stepping: spend ~9 ms per frame on physics (scaled by the speed setting)
       const budget = 12 * state.speed;
-      const subs = Math.max(1, Math.min(16, Math.floor(budget / Math.max(0.05, state.msPerSub))));
+      const subs = Math.max(1, Math.min(24, Math.floor(budget / Math.max(0.05, state.msPerSub))));
       const t0 = performance.now();
       sim.step(subs);
       const per = (performance.now() - t0) / subs;

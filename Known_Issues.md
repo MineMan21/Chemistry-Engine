@@ -25,7 +25,7 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 
 | # | Issue | Status |
 | --- | --- | --- |
-| G | Solids break when grabbed or thrown | **Improved**: see the table below |
+| G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
 | 3 | Ethanol decomposes at room temperature | **Improved**: ~95% intact after 15 s |
@@ -77,44 +77,67 @@ rules:
 
 ## Grabbing and throwing solids
 
-Reported issue: many solids were too weak to survive being grabbed or thrown. Each lump below
-(0.3 mol, settled on the floor) was grabbed by a patch at its top, lifted 700 units in about a
-second, then thrown at the glass. "Lift" says whether the lump came up with the hand (as a
-share when it didn't); "throw" is the share left in its largest piece afterwards.
+Reported issue: many solids were too weak to survive being grabbed or thrown, and moving
+something with the hand warmed it up.
+
+Each lump below (0.3 mol, settled on the floor) was grabbed by a patch at its top, lifted
+700 units, then thrown at the glass at the hand's top speed. Each entry is the share of the lump
+left in its largest piece after the lift and after the throw.
 
 | Solid | Before: lift / throw | After: lift / throw |
 | --- | --- | --- |
-| Iron, copper | whole / whole | whole / whole |
+| Iron, copper, gold | whole / whole | whole / whole |
 | Aluminium | 8% / torn | whole / whole |
-| Lead | 12% / torn | whole / 81% (chipped) |
+| Lead | 12% / torn | whole / whole |
+| Gallium (270 K) | 8% / torn | whole / 97% (dented) |
 | Graphite | 81% / whole | whole / whole |
 | Silicon | 0% (stuck) | whole / whole |
 | Salt (NaCl) | 8% / torn | whole / whole |
-| Magnesium oxide | 0% / torn | came up, in two pieces / ~50% |
-| Ice (200 K) | 12% / torn | whole / ~50% (two pieces) |
-| Sulfur | 4% / torn | whole / shatters |
+| Magnesium oxide | 0% / torn | whole / whole |
+| Ice (200 K) | 12% / torn | whole / whole |
+| Sulfur | 4% / torn | crumbles (its rings form hot, above its melting point) |
 | Iodine | 2% / torn | still fails |
-| Gallium (270 K) | 8% / torn | still fails |
+
+Heating: a 300-atom lump of iron, lead or gold, lifted and held in mid-air in an insulated jar,
+now changes temperature by about 1–3 K per second. An untouched lump drifts about the same.
+Before, a held lump of iron gained tens of kelvin per second.
 
 What changed:
 
-- **The hand holds the whole solid object** it touches: a flood fill through touching solid
-  atoms, whole crystal grains and bonded networks. It used to hold only the patch under the
-  cursor. A liquid still gives only the patch, so it still stretches and drips.
-- **Salts, oxides and molecular solids** (iodine, sulfur, FeCl₃ below their melting points)
-  are now held by the same kind of springs as metal crystals, and let go at their real melting
-  points. Low-melting metals (lead, aluminium, tin) get a minimum lattice stiffness.
-- **Covalent networks** (graphite, silicon) now feel settling gravity. They used to float.
-- **Soft landings:** material approaching the glass or floor slows down, as it already did
-  toward the floor. In the real-world jar the fastest flow is a few centimetres per second.
+- **Cohesion comes only from the atoms' own forces.** Each metal's attraction now adds up to its
+  real cohesive energy (iron 413 kJ/mol, lead 196, from Kittel). It is a pair well plus a
+  many-body embedding term, which makes an atom inside dense metal more tightly bound than one
+  at a surface, crack or cluster. Metal crystals no longer have template springs: springs to a
+  lattice template are not forces between atoms, and they leaked energy as the template refit.
+  Nothing slows atoms near the glass or the floor any more.
+- **Metal melting points come from the pair well alone.** Without the springs, the pair well was
+  recalibrated so that iron is solid at 1600 K and liquid at 2000 K, and lead melts between 500
+  and 650 K. The many-body term only acts on atoms being pulled out of the metal, so it cannot
+  favour the crystal. A version that also acted inside the metal froze mercury at room
+  temperature.
+- **The time step is shorter** (1 ms instead of 1.5 ms). With real cohesion a metal lattice is
+  stiff, and the longer step leaked energy into it: an iron lump heated by itself at about
+  30 K per second. Per-substep rates are rescaled so that everything else happens at the same
+  rate per simulated second.
+- **The hand works at the scale of the simulation.** On screen, the hand moves things at a few
+  times the thermal speed of their atoms, about 10^13 times harsher than a real hand. Pulling a
+  lump along by the patch under the cursor therefore stretched it plastically and heated it,
+  which real handling never does to something a few nanometres across. The hand now carries a
+  solid as a whole: its weight and the hand's push are shared over the atoms touching each
+  other, the way gravity acts. The push depends only on the motion of the body as a whole, so
+  it neither heats, cools nor freezes the atoms, and the heat exchange with the jar no longer
+  drags the lump back. Once the lump is let go, or when it hits the glass, nothing but its own
+  bonds holds it together. A liquid is still dragged by the patch alone, so it stretches and
+  drips.
 
 Still open:
 
 - **Iodine:** its model is far too volatile. At 293 K its solid has regions above its 387 K
   melting point, so it crumbles.
-- **Gallium:** it sits only ~35 K below its melting point, and local warm spots melt atoms out
-  of the lump. Real gallium melts in the hand.
-- **Molecular solids on impact:** ice, sulfur and MgO still crack when thrown at full speed.
+- **Metals melt gradually** (as 2D solids do), and gallium and mercury freeze some way below
+  their real melting points (gallium is solid at 240 K and liquid at 340 K).
+- **Impacts are violent at this scale:** the hand's top speed is near the speed of a rifle
+  bullet in the real-world jar, so a lump thrown at the glass warms up noticeably.
 
 ---
 
