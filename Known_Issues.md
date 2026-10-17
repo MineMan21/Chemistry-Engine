@@ -28,6 +28,7 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 | P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers | **Fixed**: see below |
 | L | Flames give off no light | **Fixed**: see below |
 | W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
+| D | Dropped iron dents; metals too malleable | **Improved**: directional metal bonding halves it; see below |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
@@ -235,7 +236,31 @@ Still open:
   their real melting points (gallium is solid at 200 K, only partly ordered at 240 K, and liquid
   at 340 K).
 - **Impacts are violent at this scale:** the hand's top speed is near the speed of a rifle
-  bullet in the real-world jar, so a lump thrown at the glass warms up noticeably.
+  bullet in the real-world jar, so a lump thrown at the glass warms up noticeably. The same goes
+  for a dropped lump: the settling force is roughly 10^12 times real gravity, so a lump dropped
+  from high in the jar lands at about 1.5 km/s in real-world terms. That impact delivers about
+  16% of iron's cohesive energy per atom, about a billion times what a real dropped lump
+  delivers.
+
+### Denting of dropped metal
+
+Reported issue: iron dropped in the jar dented and was more malleable than iron.
+
+What changed: metals now have directional bonding. Each atom prefers its neighbours at the
+close-packed crystal's 60° angles, so the lattice resists shear and slip as well as compression.
+The pair well was lowered so that iron, lead, mercury and gallium still melt where they should;
+iron's melting is now sharper and closer to real (solid at 1650 K, liquid by about 2050 K).
+
+| Iron lump (0.3 mol) dropped from high in the jar | Before | After |
+| --- | --- | --- |
+| Contacts rearranged on landing | 26% | ~15% |
+| Peak temperature on impact | ~1220 K | ~1250 K |
+
+What's left: about half the denting remains. The impact is the size of a rifle bullet's, and a
+real iron bullet mushrooms too, so a melting-point-calibrated metal cannot shrug it off
+entirely. Directional bonding about seven times stronger removes the denting completely, but
+then iron stays solid above 2100 K. The rest of the fix would be a weaker (but still uniform) settling force for
+solids, so dropped lumps land slower.
 
 ---
 

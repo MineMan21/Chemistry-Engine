@@ -86,8 +86,11 @@
     // the energy to pull the solid apart into free atoms) beyond what the pair well gives, so a
     // lump holds its atoms as firmly as the real metal: iron 413 kJ/mol, about 27 times its
     // melting temperature, where the pair well alone gives under 7
-    METAL_EPS_PER_MP: 2.2, // (calibrated on iron, lead and mercury with nothing else ordering the
-    // crystal: the pair well alone decides where the solid melts)
+    METAL_ANG_PER_MP: 0.15, // directional metallic bonding (K per K of melting point): see metalAngleEnergy
+    METAL_ANG_IN: 1.3, // its neighbour weight is 1 out to this many contact distances...
+    METAL_ANG_OUT: 1.6, // ...and fades to 0 here (between the first and second neighbour shells)
+    METAL_EPS_PER_MP: 1.6, // (calibrated on iron, lead and mercury together with the directional
+    // term: between them they decide where the solid melts)
     METAL_EMBED: 1, // (0 switches the many-body term off)
     METAL_RHO_A: 0.2, // rho is about 3.3 inside a solid, 2.9 inside a melt and 2.2 at a flat
     METAL_RHO_B: 1.6, // surface: all of them saturate the embedding, so it cannot favour the
@@ -103,6 +106,7 @@
     // speed of its atoms, so what it carries through a gas is not scorched by the gas)...
     GRAB_MAX_ACCEL: 5000, // ...and how hard it accelerates it (units/s^2): a patch of liquid is
     // pulled out of the pool when its cohesion cannot keep up
+    METAL_G_EPS_PER_MP: 2.2, // (see metalG)
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
     G_CONDENSED: 650,
@@ -210,10 +214,13 @@
   const en = new Float32Array(NZ), maxVal = new Uint8Array(NZ), normVal = new Uint8Array(NZ);
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
   const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ);
+  const metalAng = new Float32Array(NZ); // strength of the directional term (energy units)
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   const meltK = new Float32Array(NZ); // melting point (K)
   const pairSigma = new Float32Array(NZ * NZ), pairRc = new Float32Array(NZ * NZ), pairRcIon = new Float32Array(NZ * NZ);
   const pairRhoRc = new Float32Array(NZ * NZ); // reach of the metallic embedding density
+  // reach of the directional metallic term: full weight to agIn, fading to zero at agOutR
+  const agIn = new Float32Array(NZ * NZ), agOutR = new Float32Array(NZ * NZ), agOut2 = new Float32Array(NZ * NZ);
   const ionCap = new Uint8Array(NZ); // can form ionic bonds with some element
   const catR = new Float32Array(NZ), anR = new Float32Array(NZ); // ionic contact radii (units)
   const pairEps = new Float32Array(NZ * NZ), pairMetalEps = new Float32Array(NZ * NZ);
@@ -236,9 +243,12 @@
     // cohesive energy (K per atom) minus the pair well's share: half of 6 close-packed neighbours
     const coh = (METAL_COHESION[e.symbol] || 0.12 * (e.bp || 3000)) / P.R_KJ;
     metalA[z] = e.isMetal ? P.METAL_EMBED * Math.max(0, coh - 3 * metalEps[z]) * P.KB : 0;
+    metalAng[z] = e.isMetal ? P.METAL_ANG_PER_MP * (e.mp || 1000) * P.KB : 0;
     // the settling force on a free metal atom, scaled down for heavy, weakly bound metals (it is
     // proportional to mass), so that it never squeezes liquid mercury or gallium into a crystal
-    metalG[z] = e.isMetal ? Math.min(1, metalEps[z] / mass[z] / P.METAL_G_REF) : 1;
+    // (measured against a fixed well per K of melting point, so that how a metal's binding is
+    // split between its pair well and its directional bonding does not change how hard it falls)
+    metalG[z] = e.isMetal ? Math.min(1, P.METAL_G_EPS_PER_MP * (e.mp || 1000) / mass[z] / P.METAL_G_REF) : 1;
     elColor[z] = packColor(e.color);
     meltK[z] = e.mp || 1000;
     // metals (mercury!) barely wet glass; everything else feels a fraction of its dispersion
@@ -253,6 +263,8 @@
       // (a short one sublimes the solid almost as soon as it melts, especially in two dimensions)
       pairRc[p] = pairSigma[p] * (isMetal[a] && isMetal[b] ? P.METAL_RC_FACTOR : P.RC_FACTOR);
       pairRhoRc[p] = isMetal[a] && isMetal[b] ? pairSigma[p] * P.METAL_RHO_REACH : 0;
+      agIn[p] = pairSigma[p] * P.METAL_ANG_IN; agOutR[p] = pairSigma[p] * P.METAL_ANG_OUT;
+      agOut2[p] = isMetal[a] && isMetal[b] ? agOutR[p] * agOutR[p] : 0;
       pairEps[p] = Math.sqrt(vdwEps[a] * vdwEps[b]) * P.KB;
       pairMetalEps[p] = Math.sqrt(metalEps[a] * metalEps[b]) * P.KB;
     }
@@ -323,6 +335,10 @@
     this.carried = new Uint8Array(M); // 1 for the solid body hanging from them (see updateCarried)
     this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
     this.fsP = new Float64Array(M); // minus the derivative of its embedding energy
+    // directional metallic bonding: per atom the summed neighbour weight S and six-fold order Psi,
+    // and the metal pairs within reach (i, j; unit vector, distance, weight, its derivative)
+    this.agS = new Float64Array(M); this.agR = new Float64Array(M); this.agI = new Float64Array(M);
+    this.agP = new Int32Array(8 * M); this.agD = new Float64Array(28 * M);
     this.fsI = new Int32Array(16 * M); this.fsJ = new Int32Array(16 * M);
     this.fsD = new Float64Array(32 * M); // metal pairs inside the density range: i, j, dphi/dr * (dx, dy)/d
     this.mark = new Int32Array(M); this.markTag = 0;
@@ -926,8 +942,10 @@
   // ---------------------------------------------------------------------------------------
   S.updateGrid = function () {
     let maxRc = 20;
+    this.anyMetal = false;
     for (let a = 1; a < NZ; a++) {
       if (!this.present[a]) continue;
+      if (isMetal[a]) this.anyMetal = true;
       for (let b = a; b < NZ; b++) {
         if (!this.present[b]) continue;
         maxRc = Math.max(maxRc, pairRc[a * NZ + b], pairRhoRc[a * NZ + b]);
@@ -1004,6 +1022,10 @@
     const rho = this.rho, fsI = this.fsI, fsJ = this.fsJ, fsD = this.fsD, fsMax = fsI.length;
     rho.fill(0, 0, n);
     let nFs = 0;
+    const angOn = P.METAL_ANG_PER_MP > 0 && this.anyMetal, agS = this.agS, agR = this.agR, agI = this.agI;
+    const agP = this.agP, agD = this.agD, agMax = agP.length / 2;
+    let nAg = 0;
+    if (angOn) { agS.fill(0, 0, n); agR.fill(0, 0, n); agI.fill(0, 0, n); }
 
     // atoms three bonds apart (opposite corners of a ring) touch within one molecule: that is not
     // being packed in a liquid, so it must not count as a contact (a lone benzene molecule would
@@ -1040,6 +1062,20 @@
       }
       const d = Math.sqrt(d2) || 1e-6;
       const fm = isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j];
+      if (fm && angOn && d2 < agOut2[p] && nAg < agMax) {
+        // directional metallic bonding: neighbour weight f(d) and the six-fold phase of the bond
+        const d0 = d, ux = dx / d0, uy = dy / d0;
+        let f = 1, fp = 0;
+        const t = (d0 - agIn[p]) / (agOutR[p] - agIn[p]);
+        if (t > 0) { f = 1 - t * t * t * (t * (6 * t - 15) + 10); fp = -30 * t * t * (1 - t) * (1 - t) / (agOutR[p] - agIn[p]); }
+        // (ux + i uy)^6, the same seen from either end
+        const c2 = ux * ux - uy * uy, s2 = 2 * ux * uy, c4 = c2 * c2 - s2 * s2, s4 = 2 * c2 * s2;
+        const zr = c4 * c2 - s4 * s2, zi = c4 * s2 + s4 * c2;
+        agS[i] += f; agS[j] += f; agR[i] += f * zr; agR[j] += f * zr; agI[i] += f * zi; agI[j] += f * zi;
+        agP[2 * nAg] = i; agP[2 * nAg + 1] = j;
+        const o = 7 * nAg; agD[o] = ux; agD[o + 1] = uy; agD[o + 2] = d0; agD[o + 3] = f; agD[o + 4] = fp; agD[o + 5] = zr; agD[o + 6] = zi;
+        nAg++;
+      }
       if (fm && d2 < rr * rr) {
         // metallic density phi(d) = (1 - (d/R)^2)^3 out to its reach R: smooth (twice
         // differentiable everywhere), so the integrator keeps the energy of these strong forces
@@ -1205,6 +1241,25 @@
         const gx = c * fsD[2 * k], gy = c * fsD[2 * k + 1];
         fx[j] += gx; fy[j] += gy;
         fx[i] -= gx; fy[i] -= gy;
+      }
+    }
+    if (nAg) {
+      // U_i = lambda_i / 2 (S_i^2 - |Psi_i|^2): zero when the neighbours sit at multiples of 60
+      // degrees (the close-packed layer), rising as the bond angles are bent away from it. For
+      // centre i and neighbour j at r (unit u, tangent t = u rotated 90 degrees, z = e^{6i theta}):
+      // dU_i/dr_j = lambda_i [S_i f' u - f' Re(Psi_i* z) u + 6 (f / r) Im(Psi_i* z) t]
+      for (let k = 0; k < nAg; k++) {
+        const i = agP[2 * k], j = agP[2 * k + 1], o = 7 * k;
+        const ux = agD[o], uy = agD[o + 1], r = agD[o + 2], f = agD[o + 3], fp = agD[o + 4], zr = agD[o + 5], zi = agD[o + 6];
+        for (let side = 0; side < 2; side++) {
+          const c = side ? j : i, nbr = side ? i : j, sg = side ? -1 : 1, lam = metalAng[el[c]];
+          if (!lam) continue;
+          const re = agR[c] * zr + agI[c] * zi, im = agR[c] * zi - agI[c] * zr;
+          const a = lam * fp * (agS[c] - re), b = lam * 6 * f / r * im;
+          // radial along sg*u, tangential along sg*t (both flip with the direction)
+          const gx = sg * (a * ux - b * uy), gy = sg * (a * uy + b * ux);
+          fx[nbr] -= gx; fy[nbr] -= gy; fx[c] += gx; fy[c] += gy;
+        }
       }
     }
     if (P.W3_EPS) for (let i = 0; i < n; i++) if (this.isWaterO(i)) this.waterAngle(i, true);
@@ -1901,6 +1956,49 @@
     if (P.W3_EPS) U += this.waterAngleEnergyNear(set, count);
     if (P.W2_EPS) U += this.waterDenseEnergyNear(set, count);
     if (P.METAL_EMBED) U += this.metalEnergyNear(set, count);
+    if (P.METAL_ANG_PER_MP) U += this.metalAngleEnergyNear(set, count);
+    return U;
+  };
+
+  // Directional metallic bonding. A metal's bonds are not quite indifferent to direction: its
+  // atoms prefer their neighbours at the angles of the close-packed crystal, which is what makes a
+  // solid metal resist being sheared or dented rather than just compressed (in real metals the
+  // d electrons; modelled as in angular embedded-atom models). Each free metal atom i with
+  // neighbours j (weight f_j: 1 in the first shell, fading to 0 before the second) has
+  //   U_i = lambda / 2 (S_i^2 - |Psi_i|^2),  S_i = sum f_j,  Psi_i = sum f_j exp(6 i theta_ij),
+  // which is zero when every neighbour sits at a multiple of 60 degrees and rises as bond angles
+  // are bent away from it (U_i = lambda sum over neighbour pairs of f_j f_k (1 - cos 6 theta_jk)).
+  // A melt pays it too, so the pair well is set lower to keep the melting points.
+  S.metalAngleEnergy = function (i) {
+    const el = this.el, ei = el[i], lam = metalAng[ei];
+    if (!lam || this.nb[i]) return 0;
+    const x = this.x, y = this.y, nb = this.nb;
+    let S = 0, R = 0, I = 0;
+    this.query(x[i], y[i], this.cellSize, function (j) {
+      if (j === i || !isMetal[el[j]] || nb[j]) return;
+      const p = ei * NZ + el[j], dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
+      if (d2 >= agOut2[p]) return;
+      const d = Math.sqrt(d2), ux = dx / d, uy = dy / d, t = (d - agIn[p]) / (agOutR[p] - agIn[p]);
+      const f = t > 0 ? 1 - t * t * t * (t * (6 * t - 15) + 10) : 1;
+      const c2 = ux * ux - uy * uy, s2 = 2 * ux * uy, c4 = c2 * c2 - s2 * s2, s4 = 2 * c2 * s2;
+      S += f; R += f * (c4 * c2 - s4 * s2); I += f * (c4 * s2 + s4 * c2);
+    });
+    return 0.5 * lam * (S * S - R * R - I * I);
+  };
+  // ...summed over the atoms of a set and the metal atoms around them (an event can change any of
+  // their environments)
+  S.metalAngleEnergyNear = function (set, count) {
+    const el = this.el, nb = this.nb, tag = ++this.markTag, mark = this.mark, self = this;
+    let U = 0;
+    for (let a = 0; a < count; a++) {
+      const i = set[a];
+      if (!isMetal[el[i]]) continue;
+      if (mark[i] !== tag) { mark[i] = tag; U += this.metalAngleEnergy(i); }
+      this.query(this.x[i], this.y[i], this.cellSize, function (j) {
+        if (mark[j] === tag || !isMetal[el[j]] || nb[j]) return;
+        mark[j] = tag; U += self.metalAngleEnergy(j);
+      });
+    }
     return U;
   };
 

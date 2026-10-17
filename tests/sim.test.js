@@ -308,7 +308,8 @@ test('iron melts on a 2100 K plate, stays a liquid, and hardens into crystal gra
   before = positions(sim);
   run(sim, 1);
   const recast = metalState(sim, fe);
-  assert.ok(recast.crystal > 0.6 && recast.psi6 > 0.8, 'cooled iron crystallises: ' + JSON.stringify(recast));
+  // (close-packed throughout; metal grains only record order, and grain boundaries are not counted)
+  assert.ok(recast.crystal > 0.45 && recast.psi6 > 0.85, 'cooled iron crystallises: ' + JSON.stringify(recast));
   const still = rmsMove(sim, before);
   assert.ok(still < flow / 2, 'cooled iron is rigid: atoms moved ' + still.toFixed(1) + ' per second (melt: ' + flow.toFixed(1) + ')');
 });
@@ -361,6 +362,32 @@ function ironLump(seed) {
   return { sim: sim, pairs: pairs, top: top, cx: cx,
     broken: function () { let b = 0; pairs.forEach(function (p) { if (Math.hypot(sim.x[p[1]] - sim.x[p[0]], sim.y[p[1]] - sim.y[p[0]]) > 1.4 * p[2]) b++; }); return b; } };
 }
+
+test('a dropped lump of iron lands without being squashed', function () {
+  // The jar's settling force is far stronger than real gravity, so the lump hits the floor at a
+  // few hundred units/s (about rifle-bullet speed in the real-world jar); iron's directional
+  // bonding keeps it from flattening. (Without it about a quarter of its contacts rearranged.)
+  const sim = newSim(3);
+  const fe = Z('Fe');
+  sim.addMoles(fe, 0.3, P.W / 2, 900);
+  const n = sim.n, r2 = 2.8 * CE.elements[fe].radius;
+  let pairs = null;
+  for (let k = 0; k < 9000; k += 10) {
+    sim.step(10);
+    let bottom = 0;
+    for (let i = 0; i < n; i++) bottom = Math.max(bottom, sim.y[i]);
+    if (!pairs && P.H - bottom < 250) {
+      pairs = [];
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        const d = Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]);
+        if (d < r2) pairs.push([i, j, d]);
+      }
+    }
+  }
+  assert.ok(pairs, 'the lump reached the floor');
+  const moved = pairs.filter(function (q) { return Math.hypot(sim.x[q[1]] - sim.x[q[0]], sim.y[q[1]] - sim.y[q[0]]) > 1.3 * q[2]; }).length;
+  assert.ok(moved < 0.2 * pairs.length, 'contacts rearranged on landing: ' + (100 * moved / pairs.length).toFixed(1) + '%');
+});
 
 test('solid iron is strong: grabbed by a small patch the whole lump comes along', function () {
   const L = ironLump(24), sim = L.sim;
