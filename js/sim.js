@@ -117,7 +117,13 @@
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
-    ALPHA_4C: 0.22, // same for concerted four-centre exchanges (mostly symmetry forbidden)
+    ALPHA_4C: 0.4, // same for concerted four-centre exchanges between two whole molecules: they are
+    // symmetry forbidden, so stable substances (sulfuric acid, benzene) do not condense or
+    // polymerise by themselves; real reactions of this kind go through radicals, ions or catalysts
+    ALPHA_4C_SMALL: 0.22, // ...except between two small molecules (up to 5 atoms: H2 + Cl2, H2O2, CH4),
+    // where the exchange stands in for the radical chains this coarse model cannot sustain
+    LIGHT_YIELD: 15, // brightness of a reaction's flash per kJ/mol of heat it gives off (display units)
+    AROMATIC_RES: 150, // resonance energy (kJ/mol) of an aromatic ring (benzene)
     NETWORK_O2_BARRIER: 60, // extra activation (kJ/mol) for O2 on an edge of a covalent network
     PASSIVE_BARRIER: 85, // extra activation (kJ/mol) for a halogen splitting on a metal that does not
     // react by electron transfer (iron, copper...): its own halide layer slows it at room temperature
@@ -158,6 +164,7 @@
     // the bond count leaves (measured on graphite and silicon held at a known temperature)
     ANNEAL_STEPS: 1500, // newly added atoms are held at room temperature while they settle in
     RADICAL_CAPTURE: 0.6, // fraction of the attraction range within which radicals can react
+    REACT_REACH: 1.05, // a pair still reacts if it is within this multiple of that range when its turn comes
     FRESH: 30, // substeps of softened repulsion after an atom is created or changes bonds
     BOND_RAMP: 0.5, // units per substep a new/changed bond moves toward its rest length
     SHAKE_ITERS: 3, // constraint solver iterations per substep
@@ -307,9 +314,11 @@
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
     this.netF = new Uint8Array(M); // 1: part of a covalent network (graphite, silicon, sulfur chains)
+    this.arom = new Uint8Array(M); // 1: in an aromatic six-membered ring (benzene)
     this.coh = new Float32Array(M).fill(1); // cohesion factor of the molecule (see COHESION)
     this.grainOf = new Int32Array(M).fill(-1); // crystal grain an atom belongs to (-1: none)
     this.grab = null; // the grab tool's hold (see grabStart)
+    this.burst = null; // a spark or chill being applied (see startBurst)
     this.held = new Uint8Array(M); // 1 for atoms the grab tool holds
     this.carried = new Uint8Array(M); // 1 for the solid body hanging from them (see updateCarried)
     this.rho = new Float64Array(M); // metallic neighbour density of free metal atoms
@@ -396,7 +405,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0;
     this.anneal[i] = Math.round(P.ANNEAL_STEPS * P.DT_REF / P.DT);
-    this.meltT[i] = 0; this.netF[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
+    this.meltT[i] = 0; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -693,7 +702,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.gAcc[i] = this.gAcc[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
     this.grainOf[i] = this.grainOf[last];
     if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
     this.grainOf[last] = -1;
@@ -772,6 +781,7 @@
     k = this.nb[j]++;
     this.bp[j * MB + k] = i; this.bo[j * MB + k] = order; this.bc[j * MB + k] = cls; this.bl[j * MB + k] = len;
     this.markFresh(i); this.markFresh(j);
+    this.clearAromatic(i); this.clearAromatic(j);
     this.used[i] += order; this.used[j] += order;
     this.updateCharge(i); this.updateCharge(j);
     return true;
@@ -799,6 +809,7 @@
     }
     this.updateCharge(i); this.updateCharge(j);
     this.markFresh(i); this.markFresh(j);
+    this.clearAromatic(i); this.clearAromatic(j);
   };
 
   // Starts the grace period of atom i. Its kinetic energy may not exceed what it had (or the
@@ -1335,7 +1346,10 @@
         Tw = this.plateTemp; gamma = P.PLATE_GAMMA;
       }
 
-      if (this.anneal[i] && (--this.anneal[i], contacts[i] >= 1 || this.nb[i] >= 2)) {
+      // (only liquids, solids and networks, or atoms still assembling into one, settle in: a
+      // freshly added gas of whole molecules is left alone, so a spark can light it straight away instead of the
+      // flame being held at room temperature; see also heat())
+      if (this.anneal[i] && (--this.anneal[i], condF[i] > 0.5 || this.netF[i] || (this.nb[i] >= 2 && this.used[i] < normVal[el[i]]))) {
         // freshly added condensed material: remove the heat of settling / self-assembly by
         // rescaling only the random motion (relative to the local flow), toward room temperature,
         // so a freshly dropped blob still falls freely
@@ -1677,6 +1691,43 @@
   // Deposits (dE > 0) or withdraws (dE < 0) reaction enthalpy (kJ/mol) as kinetic energy.
   S.heat = function (i, j, dE) {
     this.heatRaw(i, j, dE * P.HEAT_FRACTION * ENERGY_PER_KJ);
+    // (the products of a reaction that gives off heat are not freshly added material settling in)
+    if (dE > 0) { this.emitLight(i, j, dE); this.anneal[i] = 0; this.anneal[j] = 0; }
+  };
+
+  // ---------------------------------------------------------------------------------------
+  // Light. A reaction that makes a bond can leave the new molecule electronically excited, and
+  // it gives the excess off as light (chemiluminescence): the faint violet-blue of excited OH in
+  // a hydrogen flame (most of it ultraviolet, which is why a hydrogen flame is so hard to see),
+  // the blue of CH and C2 in a hydrocarbon flame, the yellow-green of NO2, and a burning metal's
+  // own colour. Each such event records a flash (where, how much energy, what colour); the
+  // renderer drains them. Hot metal atoms in a gas also glow in their flame-test colours.
+  // ---------------------------------------------------------------------------------------
+  const FLAME_COLOR = {
+    Li: [230, 30, 70], Na: [255, 190, 40], K: [190, 130, 255], Rb: [210, 60, 130], Cs: [130, 110, 255],
+    Ca: [255, 110, 40], Sr: [255, 40, 40], Ba: [160, 255, 90], Cu: [40, 255, 170], B: [80, 255, 80],
+    In: [90, 90, 255], Tl: [110, 255, 110], Pb: [190, 210, 255], Mg: [255, 255, 245], Al: [255, 255, 240],
+    Fe: [255, 220, 150], Zn: [180, 220, 255]
+  };
+  const flameColor = new Array(NZ).fill(null);
+  for (const sym in FLAME_COLOR) { const e = E.find(function (x) { return x && x.symbol === sym; }); if (e) flameColor[e.z] = FLAME_COLOR[sym]; }
+  Simulation.flameColor = flameColor;
+  function chemiColor(a, b) {
+    if (isMetal[a] || isMetal[b]) return flameColor[isMetal[a] ? a : b] || [255, 245, 225];
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    if (lo === 6 || hi === 6) return [90, 140, 255]; // CH*, C2* (with C-O: the CO + O blue)
+    if (lo === 7 && hi === 8) return [215, 235, 130]; // NO2*
+    if ((lo === 1 || lo === 8) && hi === 8) return [165, 140, 255]; // OH* (306 nm) and O2*
+    if (lo === 1 && hi === 1) return [170, 150, 255];
+    if (hi === 9 || hi === 17) return [200, 235, 210]; // pale halogen flames
+    return [210, 215, 255];
+  }
+  S.emitLight = function (i, j, dE) {
+    const L = this.light || (this.light = { buf: new Float32Array(6 * 4096), n: 0 });
+    if (L.n >= 4096) return;
+    const c = chemiColor(this.el[i], this.el[j]), o = 6 * L.n++;
+    L.buf[o] = 0.5 * (this.x[i] + this.x[j]); L.buf[o + 1] = 0.5 * (this.y[i] + this.y[j]);
+    L.buf[o + 2] = dE * P.LIGHT_YIELD; L.buf[o + 3] = c[0]; L.buf[o + 4] = c[1]; L.buf[o + 5] = c[2];
   };
 
   // Same as heat() with the energy already in simulation units. The energy is shared with the
@@ -2137,6 +2188,65 @@
     return need < (this.cellKE[c] - this.cellDebt[c]) * 0.5;
   };
 
+  // Aromatic rings. Benzene's six pi electrons are shared around its ring, which makes it about
+  // 150 kJ/mol more stable than three separate C=C bonds; without that it would add across its
+  // "double bonds" like an alkene and polymerise by itself. Rings of six carbon (or nitrogen)
+  // atoms with alternating single and double bonds are marked; breaking any bond of the ring (a
+  // double bond, or the ring itself opening) breaks up that sharing, so it costs the ring's
+  // resonance energy (AROMATIC_RES) on top, and the ring is no longer aromatic.
+  S.updateAromatic = function () {
+    const n = this.n, MB = P.MAXB, el = this.el, arom = this.arom, bp = this.bp, bo = this.bo, nb = this.nb;
+    arom.fill(0, 0, n);
+    const path = [0, 0, 0, 0, 0, 0];
+    const ok = function (a) { return (el[a] === 6 || el[a] === 7) && nb[a] >= 2; };
+    function walk(depth) { // path[0..depth-1] set; bonds alternate double (even steps) and single
+      const a = path[depth - 1], want = depth % 2 === 1 ? 2 : 1;
+      for (let k = 0; k < nb[a]; k++) {
+        const b = bp[a * MB + k];
+        if (bo[a * MB + k] !== want) continue;
+        if (depth === 6) { if (b === path[0]) return true; continue; }
+        if (!ok(b)) continue;
+        let used = false;
+        for (let m = 0; m < depth; m++) if (path[m] === b) { used = true; break; }
+        if (used) continue;
+        path[depth] = b;
+        if (walk(depth + 1)) return true;
+      }
+      return false;
+    }
+    for (let i = 0; i < n; i++) {
+      if (arom[i] || !ok(i)) continue;
+      path[0] = i;
+      if (walk(1)) for (let m = 0; m < 6; m++) arom[path[m]] = 1;
+    }
+  };
+  S.resonance = function (i, j) {
+    return this.arom[i] && this.arom[j] ? P.AROMATIC_RES : 0;
+  };
+  // a bond of an aromatic ring changed: the ring is not aromatic any more
+  S.clearAromatic = function (i) {
+    if (!this.arom[i]) return;
+    const MB = P.MAXB, stack = [i];
+    this.arom[i] = 0;
+    while (stack.length) {
+      const a = stack.pop();
+      for (let k = 0; k < this.nb[a]; k++) { const b = this.bp[a * MB + k]; if (this.arom[b]) { this.arom[b] = 0; stack.push(b); } }
+    }
+  };
+
+  // Does the molecule of atom i have at least `cap` atoms? (stops counting there)
+  S.molAtLeast = function (i, cap) {
+    const MB = P.MAXB, seen = [i];
+    for (let h = 0; h < seen.length; h++) {
+      const a = seen[h];
+      for (let k = 0; k < this.nb[a]; k++) {
+        const b = this.bp[a * MB + k];
+        if (seen.indexOf(b) < 0) { seen.push(b); if (seen.length >= cap) return true; }
+      }
+    }
+    return seen.length >= cap;
+  };
+
   // Weakest bond unit of atom a, excluding partner `skip`. Returns partner index or -1.
   S.weakestBond = function (a, skip) {
     const MB = P.MAXB, base = a * MB, ea = this.el[a];
@@ -2144,7 +2254,7 @@
     for (let k = 0; k < this.nb[a]; k++) {
       const b = this.bp[base + k];
       if (b === skip) continue;
-      const s = C.stepEnergy(ea, this.el[b], this.bo[base + k]);
+      const s = C.stepEnergy(ea, this.el[b], this.bo[base + k]) + this.resonance(a, b);
       if (s < bestE) { bestE = s; best = b; spin = ea === 8 && this.el[b] === 8 && this.bo[base + k] === 2; }
     }
     this._weakE = bestE;
@@ -2168,7 +2278,7 @@
       // snap it back across the gap and fling it off with energy from nowhere
       {
         const pp = el[i] * NZ + el[j], sg = pairSigma[pp];
-        const s = 1.05 * (sg + P.RADICAL_CAPTURE * (pairRc[pp] - sg)); // (radicals react a little before contact)
+        const s = P.REACT_REACH * (sg + P.RADICAL_CAPTURE * (pairRc[pp] - sg)); // (radicals react a little before contact)
         const dx = this.x[j] - this.x[i], dy = this.y[j] - this.y[i];
         if (dx * dx + dy * dy > s * s) continue;
       }
@@ -2283,7 +2393,8 @@
       // the abstraction barrier on the weaker bond (H2 + F2 -> HF + H + F starts the dark explosion
       // of hydrogen and fluorine; with chlorine or oxygen the same step is far uphill). Swapping
       // both pairs at once (formKL) is the symmetry-forbidden four-centre route
-      const Ea = (formKL ? P.ALPHA_4C * breakSum : P.ALPHA * Math.min(sI, sJ)) + Math.max(0, dH) + spin4;
+      const a4 = formKL && (this.molAtLeast(i, 6) || this.molAtLeast(j, 6)) ? P.ALPHA_4C : P.ALPHA_4C_SMALL;
+      const Ea = (formKL ? a4 * breakSum : P.ALPHA * Math.min(sI, sJ)) + Math.max(0, dH) + spin4;
       if (Ea / RT > lnColl() + 12) continue;
       if (rng() < Math.exp(Math.min(0, lnColl() - Ea / RT)) && this.canAfford(i, j, dH)) {
         this.beginEvent(i, j, k, l);
@@ -2416,7 +2527,7 @@
           }
         }
         // dissociation of the top bond unit
-        let step = C.stepEnergy(ei, ej, order);
+        let step = C.stepEnergy(ei, ej, order) + this.resonance(i, j);
         if (step <= 0) step = 1;
         const x = P.LN_UNI + lnDt - step / RT;
         if (x < -12) continue;
@@ -2954,9 +3065,13 @@
         this.breakStretched();
         this.solidAnneal();
       }
-      if (this.substep % 64 === 0) this.updateMeltPoints();
+      if (this.substep % 64 === 0) { this.updateMeltPoints(); this.updateAromatic(); }
       if (this.substep % 4 === 2) this.crystalUpdate();
       this.feedGas(P.DT);
+      if (this.burst) {
+        if (this.time >= this.burst.until) this.burst = null;
+        else if (this.substep % 16 === 0) this.spark(this.burst.x, this.burst.y, this.burst.r, this.burst.T);
+      }
       this.time += P.DT;
       this.substep++;
       this.impulseTime += P.DT;
@@ -3194,6 +3309,9 @@
 
   // Local heating/cooling tool (spark igniter / cold finger). A hot spark also splits some bonds
   // in its path, creating the radicals that start chain reactions (as a real spark does).
+  // A spark (or chill) held for a moment of simulated time, so it does the same on a fast or a
+  // slow computer: re-applied every few substeps while it lasts
+  S.startBurst = function (x, y, r, T, seconds) { this.burst = { x: x, y: y, r: r, T: T, until: this.time + seconds }; };
   // Spark (and Chill): heats (or cools) a spot to T, nothing more. A real spark ignites a mixture
   // only by heating it; any bonds broken are broken by that heat, through the usual kinetics.
   S.spark = function (x, y, r, T) {
@@ -3207,6 +3325,7 @@
       self.px[j] = self.x[j] - gaussian(self.rng) * sd;
       self.py[j] = self.y[j] - gaussian(self.rng) * sd;
       self.tLoc[j] = T; self.tSelf[j] = T;
+      self.anneal[j] = 0; // (freshly added material is no longer held at room temperature)
     }
     // heat the local temperature field as well
     const c0 = Math.max(0, Math.floor((x - r) / P.TCELL)), c1 = Math.min(this.tgw - 1, Math.floor((x + r) / P.TCELL));
