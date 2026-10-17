@@ -258,7 +258,9 @@ between Fe₃O₄ and Fe₂O₃ in composition. Exact stoichiometry is not enfor
 **Status: Fixed for graphite.** Temperature is now kinetic energy over the degrees of freedom
 actually left (2 per atom minus one per rigid bond, with a measured correction for rings and
 stiff angles in networks).
-- Graphite on an 800 K plate reads 550–820 K (it was ~250 K).
+- Graphite on an 800 K plate reads close to the plate with its chemistry switched off (it was
+  ~250 K). With chemistry on it runs warm, about 1000 K, because the bonds at its edges keep
+  breaking and re-forming and that leaks a little heat into it.
 - Silicon (four bonds per atom, almost fully rigid in 2D) still reads low: ~190 K on a 293 K
   plate (it was 20–120 K).
 

@@ -600,8 +600,10 @@ test('graphite on a hot plate reads the plate temperature', function () {
   sim.insulated = true;
   sim.addMoles(Z('C'), 0.3, P.W / 2, P.H - 200);
   sim.plateTemp = 800;
-  run(sim, 15);
-  assert.ok(sim.temperature > 500 && sim.temperature < 1100, 'graphite at ' + Math.round(sim.temperature) + ' K on an 800 K plate');
+  run(sim, 12);
+  let T = 0;
+  for (let k = 0; k < 30; k++) { run(sim, 0.1); T += sim.temperature / 30; }
+  assert.ok(T > 500 && T < 1100, 'graphite at ' + Math.round(T) + ' K on an 800 K plate');
 });
 
 test('freshly added molecules start near room temperature', function () {
@@ -673,8 +675,10 @@ test('the gauge reads no vapour over a non-volatile solid, and a lump with a str
   assert.ok(edge >= 0, 'graphite has an edge carbon with a free valence');
   const o = c.addAtom(Z('O'), c.x[edge], c.y[edge] - 14);
   c.addBond(edge, o, 1, C.bondClass(Z('C'), Z('O')));
-  const net = c.analyze().find(function (s) { return s.key.slice(-2) === ')n'; });
-  assert.ok(net && net.mol > 0.25, 'the lump still counts about 0.3 mol: ' + (net ? net.key + ' ' + net.mol.toFixed(3) : 'none'));
+  // (the graphite may have grown as more than one sheet: count every network)
+  const nets = c.analyze().filter(function (s) { return s.key.slice(-2) === ')n'; });
+  const total = nets.reduce(function (a, s) { return a + s.mol; }, 0);
+  assert.ok(total > 0.25, 'the lump still counts about 0.3 mol: ' + nets.map(function (s) { return s.key + ' ' + s.mol.toFixed(3); }).join(', '));
 });
 
 test('removing particles keeps bonds consistent', function () {
