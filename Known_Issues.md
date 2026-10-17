@@ -138,8 +138,11 @@ Still open:
 
 - **Iodine:** its model is far too volatile. At 293 K its solid has regions above its 387 K
   melting point, so it crumbles.
+- **Water is somewhat too volatile:** 0.4 mol of water in the jar at 300 K keeps about a fifth of
+  itself as vapour; real water would keep about a tenth (its vapour pressure is 0.035 atm).
 - **Metals melt gradually** (as 2D solids do), and gallium and mercury freeze some way below
-  their real melting points (gallium is solid at 240 K and liquid at 340 K).
+  their real melting points (gallium is solid at 200 K, only partly ordered at 240 K, and liquid
+  at 340 K).
 - **Impacts are violent at this scale:** the hand's top speed is near the speed of a rifle
   bullet in the real-world jar, so a lump thrown at the glass warms up noticeably.
 

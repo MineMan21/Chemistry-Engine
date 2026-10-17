@@ -1242,7 +1242,9 @@
     }
     for (let i = 0; i < n; i++) {
       // a held body moves with the hand: it is not part of the flow of what it passes through
-      if (contacts[i] < 2 || (held && held[i])) continue;
+      // (atoms of a covalent network are packed matter even where their only neighbours are the
+      // ones they are bonded to: a flake of graphite settles, it does not float like a gas)
+      if ((contacts[i] < 2 && !this.netF[i]) || (held && held[i])) continue;
       let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
       tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
       tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
@@ -2988,7 +2990,8 @@
     g.hx = x; g.hy = y; g.t = this.time;
   };
   S.grabEnd = function () { this.grab = null; this.held.fill(0); this.carried.fill(0); };
-  // The solid body the held patch belongs to: solid atoms in contact with it, and with each other.
+  // The solid body the held patch belongs to: solid atoms bonded to it or within reach of its
+  // attraction (graphite sheets resting on one another), and so on outward.
   // (A liquid is not carried: it hangs from the hand by its own cohesion, and drips.)
   S.updateCarried = function () {
     const n = this.n, carried = this.carried, el = this.el, x = this.x, y = this.y, self = this;
@@ -2999,8 +3002,12 @@
     while (queue.length) {
       const i = queue.pop();
       body.push(i);
+      for (let k = 0; k < this.nb[i]; k++) { // (bonded atoms belong to the same body)
+        const j = this.bp[i * P.MAXB + k];
+        if (!carried[j]) { carried[j] = 1; queue.push(j); }
+      }
       this.query(x[i], y[i], this.cellSize, function (j, d) {
-        if (carried[j] || d > 1.3 * pairSigma[el[i] * NZ + el[j]] || !self.isSolidAtom(j)) return;
+        if (carried[j] || d > pairRc[el[i] * NZ + el[j]] || !self.isSolidAtom(j)) return;
         carried[j] = 1; queue.push(j);
       });
     }
