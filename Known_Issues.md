@@ -28,8 +28,9 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 | P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers | **Fixed**: see below |
 | L | Flames give off no light | **Fixed**: see below |
 | W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
-| D | Dropped iron dents; metals too malleable | **Fixed**: directional bonding, and gentler gravity for falling solids; see below |
-| B | Solids float on liquids (iron on water) | **Fixed** for iron and gold; lead sinks nearly to the floor; liquid mercury still floats: see below |
+| D | Dropped iron (and tungsten) dents; metals too malleable | **Fixed**: directional bonding, and much gentler gravity for falling solids; see below |
+| B | Solids float on liquids (iron on water) | **Fixed** for iron, gold and lead; liquid mercury now sinks partway: see below |
+| E | Elements dropped on their own misbehave (silicon, sulfur, tellurium flash to 10⁴ K; silicon hangs in mid-air; sodium splats) | **Fixed** for 86 of the 96 solid elements: see "Every element dropped" below |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
@@ -238,11 +239,11 @@ Still open:
   at 340 K).
 - **Impacts are violent at this scale:** the hand's top speed is near the speed of a rifle
   bullet in the real-world jar, so a lump thrown at the glass warms up noticeably. The same goes
-  for a dropped lump: even the gentle settling force on falling solids is roughly 10^11 times
+  for a dropped lump: even the gentle settling force on falling solids is about 4×10¹¹ times
   real gravity, so a lump dropped from the top of the jar lands at a few hundred m/s in
-  real-world terms and warms by about 150 K for a moment (a real one warms by a hundredth of a
-  kelvin). Landing gently enough for that to vanish would take over a minute of simulated time
-  per fall.
+  real-world terms and warms by 50–150 K for a moment (a real one warms by a hundredth of a
+  kelvin). A drop of water falling from the top lands at about 640 units/s and warms by
+  150–220 K for a moment (at the old liquid gravity of 650, by about 390 K). Landing gently enough for that to vanish would take minutes of simulated time per fall.
 
 ### Denting of dropped metal
 
@@ -275,6 +276,19 @@ Weakly bound heavy metals (lead, tin, gold, zinc) already felt less settling gra
 proportion to their cohesion per mass, so they would not be crushed under their own weight. They
 now fall more slowly still: lead takes about 2.7 times as long as iron.
 
+Third change (reported: iron still came apart, and even tungsten did): gravity on a falling solid
+is now 6 (it was 20), and on liquids 150 (it was 650). Both are still far above real gravity:
+about 4×10¹¹ and 10¹³ times. Real gravity in the jar's units is about 2×10⁻¹¹ units/s². So no
+breakage seen here comes from gravity weaker than real; at real gravity nothing would ever land
+hard enough to dent. The weakly bound metals' reduction no longer slows them below 40% of the
+others while falling, so lead lands in about 32 s (at 14% it would take about a minute).
+
+| 1 mol dropped from the top of the jar | Gravity 20 | Gravity 6 |
+| --- | --- | --- |
+| Iron: contacts rearranged / peak temperature | 3.5% / 479 K | 0.0% / 353 K |
+| Tungsten: contacts rearranged / peak temperature | 4.6% / 757 K | 0.4% / 416 K |
+| Lead (from the survey below) | | 5.9% (lead is soft) |
+
 ### Solids floating on liquids
 
 Found while weakening gravity: liquids and solids felt different settling gravity (650 and 110).
@@ -287,11 +301,77 @@ cell it fills that connects to the liquid. Whether it sinks is then decided by d
 | --- | --- | --- |
 | Iron | Floats at the surface | Sinks to the floor |
 | Gold | Floats at the surface | Sinks to the floor |
-| Lead | Floats at the surface | Sinks to about 180 units above the floor, held up by water underneath |
+| Lead | Floats at the surface | Sinks to the floor |
+| Mercury (liquid) | Floats on top | Sinks below the surface, not yet to the floor after 16 s |
 
-What's left: lead, and above all mercury, still feel a reduced settling force in a liquid. Lead
-and tin are crushed flat under full liquid-strength gravity. Liquid mercury's settling force is
-about 1/16 of water's, so it floats on water.
+The weakly bound metals' reduced settling force is now a cap on the force itself (what keeps
+lead and liquid mercury from being squeezed), not a fraction of the liquid's. With liquids at
+150, lead in water now feels the same pull as the water; mercury keeps the pull it always had,
+about 1/4 of water's now, so it only partly sinks. Molten metal does not count as a liquid around a
+solid lump, so a solid does not float or sink properly in liquid metal (it falls as in gas).
+
+### Every element dropped
+
+Reported: drop each element on its own and check that it moves and lands properly. A script
+dropped 1 mol of each element, as the Add tool does, near the top of the jar at room temperature.
+It recorded the landing time and impact speed, contacts rearranged on landing (solids), peak and
+final temperature, and how much stayed condensed.
+
+| | First run (gravity change only) | After the fixes below |
+| --- | --- | --- |
+| Solid elements that land whole (≤10% rearranged, no overheating) | 80 of 96 | 86 of 96 |
+| Hottest element | oganesson 24,000 K, selenium 4609 K | germanium 1122 K for a moment on impact |
+| Never landed | silicon, germanium, arsenic, antimony, caesium, francium | rubidium, caesium, francium (see below) |
+
+What it found and what changed:
+
+- **Covalent network elements flashed to 10⁴–10⁵ K** (boron, silicon, phosphorus, sulfur,
+  germanium, arsenic, selenium, antimony, tellurium). They were laid down as a heap of loose
+  atoms 1.4–1.8 bond lengths apart, collapsed onto one another, and bonded and re-bonded in a
+  frenzy. An earlier fix (a reaction giving off heat ends the settling-in thermostat, so flames
+  are not quenched) also switched that thermostat off for the atoms assembling. Now these elements
+  go down already bonded in their 2D natural form: a square net (silicon, germanium), a
+  honeycomb (boron, phosphorus, arsenic, antimony; carbon as graphite), or zigzag chains joined
+  into long loops (sulfur, selenium, tellurium). Loops, because chain ends are radicals that pass
+  bonds along without end. A small flat ring like S8 was tried too: bent far from these atoms'
+  preferred 92°, it flashed hot, and its few contacts with the next rings could not hold them
+  together. While newly added, a substance also does not react with itself.
+- **Silicon hung in mid-air.** Energy owed for endothermic events was repaid by slowing the
+  atoms of a cell toward rest, not by cooling them about their own motion, so it braked a
+  falling lump. It is now paid out of motion about the flow of the packed matter in each cell. A
+  gas is still cooled toward rest: a first version also cooled gas about its own mean motion,
+  which cannot cool a lone fast atom, and iron burning in oxygen ran away to 10⁵ K.
+- **A settling lump wandered.** The strong heat exchange that holds new material at room
+  temperature gave random kicks that did not cancel. They walked a small lump of tellurium up to
+  the ceiling at tens of units/s. Each cell's net kick is now removed.
+- **Sodium, potassium and gallium splatted.** A few surface atoms jiggling past the melting
+  point (both are close to room temperature) counted as melt. That gave them, and through the
+  buoyancy rule the whole lump, liquid-strength gravity. A metal atom now switches between solid
+  and liquid gravity only when the matter around it is clearly past the melting point (by 12%),
+  and molten metal never counts as a liquid that wets a lump. Sodium went from 43% rearranged
+  to 5%.
+- **Sulfur floated like a gas** as S8 rings: an atom counted as condensed only if it or a bonded
+  neighbour touched something. The whole of a molecule now counts.
+- **Lumps did not fit.** 1 mol of a large-atom element is wider than the space above the drop
+  point. What did not fit was scattered at random through the jar. A lump is now moved in from
+  the glass until it fits.
+- **Astatine reached up to 44,000 K, oganesson 24,000 K.** Astatine and tennessine came as loose
+  atoms that paired up hot; they are now added as diatomic molecules, like iodine, packed side by
+  side. Molecules of an element with no melting point data of their own (At2) take the
+  element's, so they count as solid. Oganesson (a noble element that melts above room
+  temperature) now counts as a solid too.
+
+What's left (the 10 that do not land well):
+
+- **Rubidium, caesium and francium** (melting points 300–312 K) and **potassium** (337 K) are
+  barely below their melting points. They come in lumps as wide as the jar (their atoms are the
+  largest), fall slowly, and do not land within 60 s (potassium just does). **Gallium** (303 K)
+  half-melts and splashes.
+- **Iodine, astatine, tennessine and oganesson**, held together only by dispersion forces, fall
+  apart: in 2D a molecule has too few neighbours to hold the crystal together (iodine was already
+  listed above).
+- Sulfur, selenium and tellurium chains read 500–570 K after landing, falling slowly; silicon
+  and germanium, almost fully rigid in 2D, read too cold.
 
 ---
 

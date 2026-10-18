@@ -109,11 +109,17 @@
     METAL_G_EPS_PER_MP: 2.2, // (see metalG)
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
-    G_CONDENSED: 650, // extra gravity for packed particles (liquids and solids settle)...
-    G_SOLID: 20, // ...far gentler for a solid falling through gas: a lump dropped from the top of
-    // the jar lands at a few times the thermal speed of its atoms, not tens (an impact that
+    G_CONDENSED: 150, // extra gravity for packed particles (liquids and solids settle). Real
+    // gravity is about 2e-11 units/s^2 here (1 unit = 10 pm, and a simulated second is ~4e-12 s,
+    // set by the atoms' thermal speeds), so this is still ~1e13 times real: enough for a liquid
+    // to pool flat in seconds (much less and water climbs the glass instead), and gentler than it
+    // was (650: a drop from the top of the jar landed well past boiling)...
+    METAL_G_ABS: 650, // ...(the settling force weakly bound metals are scaled against: see metalG)
+    G_SOLID: 6, // ...far gentler for a solid falling through gas: a lump dropped from the top of
+    // the jar lands at a couple of times the thermal speed of its atoms, not tens (an impact that
     // dents it; real gravity is negligible on this scale). Immersed in a liquid, a solid feels the
     // liquid's gravity instead (buoyancy; see integrate)
+    METAL_G_MIN_DRY: 0.4, // least share of that a weakly bound metal (see metalG) feels while dry
     G_EASE: 0.01, // fraction of the way the settling force on an atom moves to its new value per substep
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
@@ -324,6 +330,8 @@
     // batch tag of atoms added together as an element: bonds between same-element atoms of one
     // batch just assemble the element's standard state (S8, graphite...), which releases no heat
     this.tag = new Int32Array(M);
+    this.born = new Int32Array(M); // the batch (addition) the atom came in with; never cleared
+    this.solidF = new Uint8Array(M); // settles as a solid (see integrate)
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
@@ -421,7 +429,7 @@
     this.py[i] = y - gaussian(this.rng) * sd;
     this.el[i] = z;
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
-    this.tag[i] = tag || 0;
+    this.tag[i] = tag || 0; this.born[i] = tag || 0; this.solidF[i] = 2;
     this.anneal[i] = Math.round(P.ANNEAL_STEPS * P.DT_REF / P.DT);
     this.meltT[i] = 0; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
@@ -477,24 +485,39 @@
     const rng = this.rng;
     const Ld = diatomic ? (C.pairLength[(z * NZ + z) * 4 + C.pairMaxOrder[z * NZ + z]] || 8) : 0;
     let ang = 0;
+    // (a molecular solid or liquid of diatomics is laid down packed, its molecules side by side)
+    const packed = diatomic && !gas;
     const free = function (x, y) {
       if (!diatomic) return free1(x, y);
-      ang = rng() * Math.PI * 2;
+      ang = packed ? 0 : rng() * Math.PI * 2;
       const ox = Math.cos(ang) * Ld / 2, oy = Math.sin(ang) * Ld / 2;
       return free1(x - ox, y - oy) && free1(x + ox, y + oy);
     };
+    // a liquid or solid is released whole where it fits: moved in from the glass if it would
+    // reach past it (what did not fit used to be scattered at random through the jar)
+    if (!gas) {
+      const R = Math.sqrt(count * spacing * spacing * (diatomic ? 2 : 0.866) / Math.PI) + 2 * r;
+      cx = Math.min(Math.max(cx, Math.min(R, P.W / 2)), Math.max(P.W - R, P.W / 2));
+      cy = Math.min(Math.max(cy, Math.min(R, P.H / 2)), Math.max(P.H - R, P.H / 2));
+    }
+    // covalent network solids are laid down already bonded, in their natural structure
+    const net = !gas && !diatomic ? networkKind(z) : 0;
+    if (net) return this.addNetwork(z, count, cx, cy, T, tag, net, free1, occupy);
     // Gases: jittered spiral (sunflower) around the drop point. Solids/liquids: a close-packed
     // triangular lattice, so the material starts near its relaxed density (no heat of compaction).
     // Whatever does not fit is scattered randomly through the jar.
     const golden = Math.PI * (3 - Math.sqrt(5));
     let spiral = 0;
     let lattice = null;
-    if (!gas && !diatomic) {
+    if (!gas) {
       lattice = [];
-      const a = spacing, rows = Math.ceil(Math.sqrt(count * 1.3)) + 2;
+      // (diatomics: molecule centres one molecule length plus a contact distance apart along the
+      // rows, the rows a contact distance apart and staggered)
+      const a = packed ? Ld + 2.05 * r : spacing, b = packed ? 2.05 * r : spacing * 0.866;
+      const rows = Math.ceil(Math.sqrt(count * 1.3 * (packed ? a / b : 1))) + 2;
       for (let j = -rows; j <= rows; j++) {
         for (let i2 = -rows; i2 <= rows; i2++) {
-          const lx = (i2 + (j & 1) * 0.5) * a, ly = j * a * 0.866;
+          const lx = (i2 + (j & 1) * 0.5) * a, ly = j * b;
           lattice.push([lx, ly, lx * lx + ly * ly]);
         }
       }
@@ -536,6 +559,120 @@
       placed++;
     }
     return { atoms: this.n - added0, units: placed, requested: count };
+  };
+
+  // Elements that bond to themselves into a covalent network (boron, carbon, silicon, phosphorus,
+  // sulfur and their heavier kin) are not added as loose atoms: dropped in a heap, they would
+  // collapse onto one another and bond in a frenzy, flashing to tens of thousands of kelvin. They
+  // are laid down as the 2D form of their solid instead: 4 = a square net of single bonds (silicon,
+  // germanium), 3 = a honeycomb (boron, phosphorus, arsenic, antimony; carbon as graphite, with
+  // alternating double bonds), 2 = long looped zigzag chains (sulfur, selenium, tellurium).
+  function networkKind(z) {
+    const e = E[z], p = z * NZ + z;
+    if (e.isMetal || e.normalValence < 2 || !(C.pairMaxOrder[p] >= 1) || !C.pairLength[p * 4 + 1]) return 0;
+    if (e.normalValence >= 4 && C.pairMaxOrder[p] >= 2) return 3; // graphite
+    return Math.min(4, e.normalValence);
+  }
+
+  S.addNetwork = function (z, count, cx, cy, T, tag, kind, free1, occupy) {
+    const p = z * NZ + z, L1 = C.pairLength[p * 4 + 1], r = radius[z];
+    const graphite = kind === 3 && C.pairMaxOrder[p] >= 2;
+    const L = graphite ? 0.5 * (L1 + C.pairLength[p * 4 + 2]) : L1;
+    const sites = [], links = []; // links: [site a, site b, order]
+    const n1 = Math.ceil(Math.sqrt(count * 1.5)) + 3;
+    const id = new Map();
+    // (sites of one loop share a group: a loop is taken whole or not at all)
+    const site = function (key, x, y, group) { id.set(key, sites.length); sites.push([x, y, group === undefined ? sites.length : group]); };
+    if (kind === 4) {
+      for (let j = -n1; j <= n1; j++) for (let i = -n1; i <= n1; i++) site(i + ',' + j, i * L, j * L);
+      for (let j = -n1; j <= n1; j++) for (let i = -n1; i <= n1; i++) {
+        const a = id.get(i + ',' + j);
+        if (id.has((i + 1) + ',' + j)) links.push([a, id.get((i + 1) + ',' + j), 1]);
+        if (id.has(i + ',' + (j + 1))) links.push([a, id.get(i + ',' + (j + 1)), 1]);
+      }
+    } else if (kind === 3) {
+      // two atoms per cell (A at the cell origin, B straight above it), cells on a1 = (sqrt3 L, 0)
+      // and a2 = (sqrt3 L / 2, 1.5 L); A bonds to its own B and to the B of the two cells below
+      const s3 = Math.sqrt(3) * L, m = Math.ceil(n1 / 1.4) + 2;
+      for (let j = -m; j <= m; j++) for (let i = -m - m; i <= m + m; i++) {
+        const x = i * s3 + j * s3 / 2, y = j * 1.5 * L;
+        if (Math.abs(x) > (m + 1) * s3) continue;
+        site('A' + i + ',' + j, x, y); site('B' + i + ',' + j, x, y + L);
+      }
+      for (const [key, a] of id) {
+        if (key[0] !== 'A') continue;
+        const [i, j] = key.slice(1).split(',').map(Number);
+        // (graphite: the bond up the cell is the double one, so every carbon has its four)
+        links.push([a, id.get('B' + i + ',' + j), graphite ? 2 : 1]);
+        if (id.has('B' + i + ',' + (j - 1))) links.push([a, id.get('B' + i + ',' + (j - 1)), 1]);
+        if (id.has('B' + (i + 1) + ',' + (j - 1))) links.push([a, id.get('B' + (i + 1) + ',' + (j - 1)), 1]);
+      }
+    } else {
+      // sulfur, selenium and tellurium: zigzag chains at the element's own bond angle, a contact
+      // distance apart, each pair of rows joined at both ends into one long closed loop (a chain's
+      // two free ends would be radicals that pass bonds along it without end; a ring as small as
+      // S8, flat, would be bent far from these atoms' preferred angle, and its few contacts with
+      // the next rings could not hold them together)
+      const th = C.twoBondAngle(z, 2), sx = L * Math.sin(th / 2), sy = L * Math.cos(th / 2);
+      const rowH = sy + 2.05 * r, pitch = 2 * rowH + sy, Rd = 1.1 * Math.sqrt(count * sx * pitch / 2 / Math.PI), m = Math.ceil(Rd / pitch) + 1;
+      let g = 0;
+      for (let j2 = -m; j2 <= m; j2++, g++) {
+        const ya = j2 * pitch, yb = ya + rowH, yc = Math.abs(ya + 0.5 * rowH);
+        const half = Math.sqrt(Math.max(0, Rd * Rd - yc * yc)), kn = 2 * Math.floor(half / sx);
+        if (kn < 4) continue;
+        const loop = [];
+        // the lower row left to right (zigzagging down from it), the upper one back right to left
+        for (let k = 0; k < kn; k++) loop.push([-half + k * sx, ya + ((k & 1) ? sy : 0)]);
+        const ends = function (x0, y0, x1, y1, side) {
+          // a half circle of atoms from (x0, y0) to (x1, y1), bulging out sideways
+          const D = Math.hypot(x1 - x0, y1 - y0), na = Math.max(0, Math.round(Math.PI * D / 2 / L) - 1);
+          const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, a0 = Math.atan2(y0 - my, x0 - mx);
+          for (let q = 1; q <= na; q++) {
+            const a = a0 + side * Math.PI * q / (na + 1);
+            loop.push([mx + D / 2 * Math.cos(a), my + D / 2 * Math.sin(a)]);
+          }
+        };
+        const xe = -half + (kn - 1) * sx;
+        ends(xe, ya + sy, xe, yb, 1);
+        for (let k = kn - 1; k >= 0; k--) loop.push([-half + k * sx, yb + ((k & 1) ? 0 : sy)]);
+        ends(-half, yb + sy, -half, ya, 1);
+        const first = sites.length;
+        for (let q = 0; q < loop.length; q++) site('l' + g + ',' + q, loop[q][0], loop[q][1], -1e6 - g);
+        for (let q = 0; q < loop.length; q++) links.push([first + q, first + (q + 1) % loop.length, 1]);
+      }
+    }
+    // the free sites (whole loops) nearest the drop point
+    const groups = new Map();
+    for (let k = 0; k < sites.length; k++) { const g = sites[k][2]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); }
+    const glist = Array.from(groups.values()).map(function (ks) {
+      let gx = 0, gy = 0;
+      for (const k of ks) { gx += sites[k][0] / ks.length; gy += sites[k][1] / ks.length; }
+      return { ks: ks, d2: gx * gx + gy * gy };
+    });
+    glist.sort(function (a, b) { return a.d2 - b.d2; });
+    const atomOf = new Int32Array(sites.length).fill(-1), chosen = [];
+    for (let q = 0; q < glist.length && chosen.length < count; q++) {
+      const ks = glist[q].ks;
+      // (a whole loop, if that comes nearer the amount asked for than stopping short)
+      if (chosen.length + ks.length > count && chosen.length && chosen.length + ks.length - count > count - chosen.length) break;
+      let ok = true;
+      for (const k of ks) {
+        const x = cx + sites[k][0], y = cy + sites[k][1];
+        if (x < r * 2 || x > P.W - r * 2 || y < r * 2 || y > P.H - r * 2 || !free1(x, y)) { ok = false; break; }
+      }
+      if (ok) for (const k of ks) chosen.push(k);
+    }
+    const added0 = this.n;
+    for (const k of chosen) {
+      const x = cx + sites[k][0], y = cy + sites[k][1];
+      const i = this.addAtom(z, x, y, T, tag);
+      if (i < 0) break;
+      atomOf[k] = i; occupy(x, y, r);
+    }
+    const cls = C.pairClass[p];
+    for (const [a, b, o] of links) if (atomOf[a] >= 0 && atomOf[b] >= 0) this.addBond(atomOf[a], atomOf[b], o, cls);
+    const atoms = this.n - added0;
+    return { atoms: atoms, units: atoms >= 0.9 * count ? count : atoms, requested: count };
   };
 
   // A template drawn by hand (flat, with square angles) can put atoms inside each other's reach:
@@ -720,7 +857,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.born[i] = this.born[last]; this.solidF[i] = this.solidF[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
     this.grainOf[i] = this.grainOf[last];
     if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
     this.grainOf[last] = -1;
@@ -909,13 +1046,18 @@
     // a molecular solid (ice, dry ice, solid iodine...) below its documented melting point
     if (this.meltT[i] && this.tLoc[i] < this.meltT[i] && this.condF[i] > 0.5) return true;
     if (isMetal[z] && nb === 0) return this.tLoc[i] < meltK[z];
-    if (nb === 0) return false;
+    // (a noble element frozen below its melting point: oganesson at room temperature)
+    if (nb === 0) return E[z].isNoble && this.condF[i] > 0.5 && this.tLoc[i] < meltK[z];
     const MB = P.MAXB, base = i * MB;
     for (let k = 0; k < nb; k++) {
       if (this.bc[base + k] === 2) return true;
       if (nb >= 2 && this.nb[this.bp[base + k]] >= 2) return true;
     }
     return false;
+  };
+
+  S.selfSettling = function (i, j) {
+    return this.anneal[i] > 0 && this.anneal[j] > 0 && this.born[i] !== 0 && this.born[i] === this.born[j];
   };
 
   S.sameBatch = function (i, j) {
@@ -1339,6 +1481,10 @@
     const W = P.W, H = P.H, rng = this.rng, wallG = this.insulated ? 0 : P.WALL_GAMMA;
     const grab = this.grab, held = grab ? this.held : null;
     let ke = 0, dofHalf = 0, impulse = 0;
+    const kick = this._kick && this._kick.length >= 3 * tSum.length ? this._kick : (this._kick = new Float64Array(3 * tSum.length));
+    const kicked = this._kicked && this._kicked.length >= n ? this._kicked : (this._kicked = new Uint8Array(this.x.length));
+    const kickCell = this._kickCell && this._kickCell.length >= n ? this._kickCell : (this._kickCell = new Int32Array(this.x.length));
+    kick.fill(0); kicked.fill(0, 0, n);
     // bulk (flow) velocity of condensed matter per coarse cell
     const mom = this.cellMom, TC = P.TCELL;
     mom.fill(0);
@@ -1352,19 +1498,36 @@
     const solN = this.cellSol || (this.cellSol = new Uint16Array(tgn));
     const wetC = this.cellWet || (this.cellWet = new Uint8Array(tgn));
     liqN.fill(0); solN.fill(0); wetC.fill(0);
-    const solidF = this.solidF && this.solidF.length >= n ? this.solidF : (this.solidF = new Uint8Array(this.x.length));
+    const solidF = this.solidF;
     // a molecule settles as a whole: an atom counts as condensed if it or a bonded neighbour
     // touches something; smoothed in time so gravity does not flicker (which would heat liquids)
     const condF = this.condF, MB = P.MAXB;
+    // (an atom of a covalent network is condensed matter even where its only neighbours are the
+    // ones it is bonded to: otherwise a lump of graphite or silicon floats as if it were a gas; and
+    // the whole of a molecule is, if any part of it is packed against others: a ring or a long
+    // molecule may touch its neighbours at only a few of its atoms)
+    const touch = this._touch && this._touch.length >= n ? this._touch : (this._touch = new Uint8Array(this.x.length));
+    for (let i = 0; i < n; i++) touch[i] = contacts[i] >= 2 || this.netF[i] ? 1 : 0;
+    for (let sweep = 0; sweep < 4; sweep++) {
+      const fwd = !(sweep & 1);
+      for (let q = 0; q < n; q++) {
+        const i = fwd ? q : n - 1 - q;
+        if (touch[i]) continue;
+        for (let k = 0; k < this.nb[i]; k++) if (touch[this.bp[i * MB + k]]) { touch[i] = 1; break; }
+      }
+    }
     for (let i = 0; i < n; i++) {
-      // (an atom of a covalent network is condensed matter even where its only neighbours are the
-      // ones it is bonded to: otherwise a lump of graphite or silicon floats as if it were a gas)
-      let c = contacts[i] >= 2 || this.netF[i] ? 1 : 0;
-      if (!c) for (let k = 0; k < this.nb[i]; k++) if (contacts[this.bp[i * MB + k]] >= 2) { c = 1; break; }
+      const c = touch[i];
       // changes gradually both ways: a force that flickers with contacts would pump energy into
       // surface molecules
       condF[i] += condRate * (c - condF[i]);
-      solidF[i] = this.isSolidAtom(i) ? 1 : 0;
+      if (isMetal[el[i]] && !this.nb[i]) {
+        // (for settling, a metal atom melts only once the matter around it is clearly past the
+        // melting point, and freezes once clearly below it: a few atoms of a lump of sodium
+        // jiggling past 371 K are not a drop of melt; 2 = not yet decided, for a new atom)
+        const mk = meltK[el[i]], tc = tCell[this.cellOfT[i]], s0 = solidF[i];
+        solidF[i] = s0 === 2 ? (this.tLoc[i] < mk ? 1 : 0) : s0 ? (tc < 1.12 * mk ? 1 : 0) : (tc < 0.88 * mk ? 1 : 0);
+      } else solidF[i] = this.isSolidAtom(i) ? 1 : 0;
     }
     for (let i = 0; i < n; i++) {
       // a held body moves with the hand: it is not part of the flow of what it passes through
@@ -1378,7 +1541,10 @@
       mom[c3] += m * (x[i] - px[i]); mom[c3 + 1] += m * (y[i] - py[i]); mom[c3 + 2] += m;
       cndN[tcy * tgw + tcx]++;
       // (an atom of a covalent network still assembling is not a liquid around the rest of it)
-      if (solidF[i] || this.netF[i]) solN[tcy * tgw + tcx]++; else liqN[tcy * tgw + tcx]++;
+      // (molten metal does not count as a liquid around a lump: the surface of a lump of sodium
+      // just past its melting point would otherwise float the whole lump in its own melt)
+      if (solidF[i] || this.netF[i]) solN[tcy * tgw + tcx]++;
+      else if (!(isMetal[el[i]] && !this.nb[i])) liqN[tcy * tgw + tcx]++;
     }
     // Solids fall through gas under far gentler settling gravity than liquids (a lump dropped
     // from the top of the jar would land fast enough to be dented). In a liquid both must pull
@@ -1389,7 +1555,9 @@
     {
       const stack = this._wetStack || (this._wetStack = new Int32Array(tgn));
       let sp = 0;
-      for (let c = 0; c < tgn; c++) if (liqN[c] >= P.SETTLE_MIN) { wetC[c] = 1; stack[sp++] = c; }
+      // (a liquid's own cells: not a lump with a few surface atoms melted, as a metal near its
+      // melting point has)
+      for (let c = 0; c < tgn; c++) if (liqN[c] >= P.SETTLE_MIN && liqN[c] > solN[c]) { wetC[c] = 1; stack[sp++] = c; }
       while (sp) {
         const c = stack[--sp], cx = c % tgw, cy = (c - cx) / tgw;
         for (let dy = -1; dy <= 1; dy++) {
@@ -1422,7 +1590,9 @@
         if (solidF[i] && !wetC[tcy * tgw + tcx]) gc = P.G_SOLID;
       }
       let g = gc * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
-      if (this.nb[i] === 0) g *= metalG[el[i]];
+      // (a solid falling through gas is pulled gently enough already that it is never squeezed;
+      // the scaling only slows how fast a weakly bound metal lands)
+      if (this.nb[i] === 0) g *= gc === P.G_SOLID ? Math.max(metalG[el[i]], P.METAL_G_MIN_DRY) : Math.min(1, metalG[el[i]] * P.METAL_G_ABS / P.G_CONDENSED);
       // the hand carries the weight of what it holds: the patch it grips and the solid body
       // hanging from it (the settling force is far stronger than real gravity on this scale;
       // its weight would tear a held lump apart, which real weight never does to a small one)
@@ -1497,6 +1667,9 @@
         // so a freshly dropped blob still falls freely
         let network = false;
         if (this.nb[i] >= 2) for (let k = 0; k < this.nb[i]; k++) if (this.nb[this.bp[i * MB + k]] >= 2) { network = true; break; }
+        // (settling brings fresh material to room temperature: it also forgives the energy owed
+        // for bonds that broke while it assembled hot, which would otherwise chill it far below)
+        if (cellDebt[this.cellOfT[i]] > 0) cellDebt[this.cellOfT[i]] = 0;
         if (network) {
           // covalent networks (carbon, sulfur...): a plain strong thermostat while they assemble
           Tw = P.AMBIENT; gamma = 40;
@@ -1529,12 +1702,19 @@
         // before it lands, nor anchor what the hand is lifting (dragging the rest of a lump
         // against the patch in the hand would strain and heat it). Only what actually touches
         // the glass or the floor feels it as friction.
-        let hvx = 0, hvy = 0;
+        let hvx = 0, hvy = 0, flowRel = false;
         if (held && held[i]) { hvx = grab.vx; hvy = grab.vy; }
         else if (held && this.carried[i]) { hvx = grab.bvx; hvy = grab.bvy; }
-        else if (noise >= 0 && !adhered && y[i] < H - rw - P.WALL_ADH_RANGE) { hvx = bvx; hvy = bvy; }
-        vx = hvx + (vx - hvx) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
-        vy = hvy + (vy - hvy) * c1 + sd * 2 * (rng() + rng() + rng() - 1.5);
+        else if (noise >= 0 && !adhered && y[i] < H - rw - P.WALL_ADH_RANGE) { hvx = bvx; hvy = bvy; flowRel = true; }
+        const kx = sd * 2 * (rng() + rng() + rng() - 1.5), ky = sd * 2 * (rng() + rng() + rng() - 1.5);
+        vx = hvx + (vx - hvx) * c1 + kx;
+        vy = hvy + (vy - hvy) * c1 + ky;
+        if (flowRel) {
+          // (the random kicks of heat exchanged about the flow must not add up to a push: the
+          // strong thermostat on a settling lump of silicon walked it about at tens of units/s)
+          const m = mass[el[i]], c = this.cellOfT[i], c3 = 3 * c;
+          kick[c3] += m * kx; kick[c3 + 1] += m * ky; kick[c3 + 2] += m; kicked[i] = 1; kickCell[i] = c;
+        }
       }
       px[i] = x[i]; py[i] = y[i];
       x[i] += vx + (this.fx[i] * im + wfx) * dt2;
@@ -1599,6 +1779,11 @@
       const own = condF[i] > 0.3 && this.tSelf[i] > 3 * tc ? 3 * tc : this.tSelf[i];
       this.tLoc[i] = (1 - w) * tc + w * own;
     }
+    for (let i = 0; i < n; i++) {
+      if (!kicked[i]) continue;
+      const c3 = 3 * kickCell[i];
+      x[i] -= kick[c3] / kick[c3 + 2]; y[i] -= kick[c3 + 1] / kick[c3 + 2];
+    }
     // repay local energy debt by gently cooling the particles of indebted cells
     let anyDebt = false;
     for (let c = 0; c < cellDebt.length; c++) if (cellDebt[c] > 0) { anyDebt = true; break; }
@@ -1611,11 +1796,28 @@
         cellDebt[c] -= pay;
         fac[c] = Math.sqrt(1 - pay / cellKE[c]);
       }
+      // the debt is paid out of heat, which is motion about the local flow: each cell's packed
+      // matter is cooled about its own mean motion (which this keeps exactly), so a falling or
+      // carried lump is cooled, not slowed down or pushed; a gas has no flow (its heat is all of
+      // its motion, as its temperature is measured: a lone fast atom is cooled, not left alone as
+      // a 'flow' of one)
+      const nc = cellDebt.length;
+      const dmx = this._dmx && this._dmx.length >= nc ? this._dmx : (this._dmx = new Float64Array(nc));
+      const dmy = this._dmy && this._dmy.length >= nc ? this._dmy : (this._dmy = new Float64Array(nc));
+      const dm = this._dm && this._dm.length >= nc ? this._dm : (this._dm = new Float64Array(nc));
+      dmx.fill(0); dmy.fill(0); dm.fill(0);
       for (let i = 0; i < n; i++) {
-        const f = fac[this.cellOfT[i]];
+        const c = this.cellOfT[i];
+        if (fac[c] === 1 || condF[i] <= 0.5 || (held && (held[i] || this.carried[i]))) continue;
+        const m = mass[el[i]];
+        dmx[c] += m * (x[i] - px[i]); dmy[c] += m * (y[i] - py[i]); dm[c] += m;
+      }
+      for (let i = 0; i < n; i++) {
+        const c = this.cellOfT[i], f = fac[c];
         if (f === 1 || (held && held[i])) continue;
-        // (what the hand carries is cooled about its own motion, not slowed down)
-        const ux = held && this.carried[i] ? grab.bvx : 0, uy = held && this.carried[i] ? grab.bvy : 0;
+        let ux = 0, uy = 0;
+        if (held && this.carried[i]) { ux = grab.bvx; uy = grab.bvy; } // (about the hand's motion)
+        else if (condF[i] > 0.5) { ux = dmx[c] / dm[c]; uy = dmy[c] / dm[c]; }
         px[i] = x[i] - ux - (x[i] - px[i] - ux) * f; py[i] = y[i] - uy - (y[i] - py[i] - uy) * f;
       }
     }
@@ -1832,6 +2034,10 @@
 
   // Deposits (dE > 0) or withdraws (dE < 0) reaction enthalpy (kJ/mol) as kinetic energy.
   S.heat = function (i, j, dE) {
+    // a freshly added substance rearranging itself as it settles in (silicon or sulfur atoms
+    // bonding, swapping and re-bonding into their network) is held at room temperature: its bonds
+    // forming and breaking neither heat it nor run up a debt (they would flash it to 10^4 K)
+    if (this.selfSettling(i, j)) return;
     this.heatRaw(i, j, dE * P.HEAT_FRACTION * ENERGY_PER_KJ);
     // (the products of a reaction that gives off heat are not freshly added material settling in)
     if (dE > 0) { this.emitLight(i, j, dE); this.anneal[i] = 0; this.anneal[j] = 0; }
@@ -2479,6 +2685,9 @@
       // at room temperature by a strong thermostat that its rigid bonds make it read hot) does not
       // react with other substances yet (it still bonds within itself)
       if (ei !== ej && (this.settling(i) || this.settling(j))) continue;
+      // ...nor with itself: it is laid down in its natural form (see addNetwork), and bonds swapping
+      // about while the strain of its first moments is still being drained would flash it hot
+      if (this.selfSettling(i, j)) continue;
       const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
       let RT = P.R_KJ * Math.max(T, 1);
       const E1 = C.pairEnergy[p * 4 + 1];
@@ -2696,6 +2905,7 @@
         const j = this.bp[i * MB + k];
         if (j < i) continue;
         const ei = el[i], ej = el[j], p = ei * NZ + ej;
+        if (this.selfSettling(i, j)) continue; // (see react)
         const order = this.bo[i * MB + k];
         const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
         const RT = P.R_KJ * Math.max(T, 1);
@@ -2759,7 +2969,11 @@
         if (e === undefined) {
           const key = C.describe(counts, mol.length, false).key;
           const ov = Simulation.cohesionOverride;
-          e = { T: CE.phase.meltingPoint(key), c: (ov && ov[key]) || COHESION[key] || 1 };
+          // (an element's own diatomic molecule with no data of its own, astatine's At2: the
+          // element's melting point, which is that of its solid)
+          const els = Object.keys(counts);
+          const mp = CE.phase.meltingPoint(key) || (els.length === 1 && mol.length === 2 && E[+els[0]].mp) || 0;
+          e = { T: mp, c: (ov && ov[key]) || COHESION[key] || 1 };
           cache.set(sig, e);
         }
         T = e.T; c = e.c;
