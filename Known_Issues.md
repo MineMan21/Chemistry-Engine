@@ -28,7 +28,8 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 | P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers | **Fixed**: see below |
 | L | Flames give off no light | **Fixed**: see below |
 | W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
-| D | Dropped iron dents; metals too malleable | **Improved**: directional metal bonding halves it; see below |
+| D | Dropped iron dents; metals too malleable | **Fixed**: directional bonding, and gentler gravity for falling solids; see below |
+| B | Solids float on liquids (iron on water) | **Fixed** for iron and gold; lead sinks nearly to the floor; liquid mercury still floats: see below |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
@@ -237,10 +238,11 @@ Still open:
   at 340 K).
 - **Impacts are violent at this scale:** the hand's top speed is near the speed of a rifle
   bullet in the real-world jar, so a lump thrown at the glass warms up noticeably. The same goes
-  for a dropped lump: the settling force is roughly 10^12 times real gravity, so a lump dropped
-  from high in the jar lands at about 1.5 km/s in real-world terms. That impact delivers about
-  16% of iron's cohesive energy per atom, about a billion times what a real dropped lump
-  delivers.
+  for a dropped lump: even the gentle settling force on falling solids is roughly 10^11 times
+  real gravity, so a lump dropped from the top of the jar lands at a few hundred m/s in
+  real-world terms and warms by about 150 K for a moment (a real one warms by a hundredth of a
+  kelvin). Landing gently enough for that to vanish would take over a minute of simulated time
+  per fall.
 
 ### Denting of dropped metal
 
@@ -256,11 +258,40 @@ iron's melting is now sharper and closer to real (solid at 1650 K, liquid by abo
 | Contacts rearranged on landing | 26% | ~15% |
 | Peak temperature on impact | ~1220 K | ~1250 K |
 
-What's left: about half the denting remains. The impact is the size of a rifle bullet's, and a
-real iron bullet mushrooms too, so a melting-point-calibrated metal cannot shrug it off
-entirely. Directional bonding about seven times stronger removes the denting completely, but
-then iron stays solid above 2100 K. The rest of the fix would be a weaker (but still uniform) settling force for
-solids, so dropped lumps land slower.
+That left about half the denting. The impact was the size of a rifle bullet's, and a real iron
+bullet mushrooms too, so a melting-point-calibrated metal could not shrug it off entirely.
+
+Second change: gravity. Settling gravity on a solid falling through gas is now 20 instead of 110
+(liquids keep 650), so a lump lands at about 280 units/s instead of about 690. A falling lump
+takes longer to land, about 17 simulated seconds from the top of the jar instead of 7.
+
+| Iron lump (0.3 mol) dropped from the top of the jar | Before | After |
+| --- | --- | --- |
+| Contacts rearranged on landing | 19.6% | 1.6% |
+| Shape (width x height) | 716x618 -> 1583x508 (spread flat) | 724x631 -> 721x612 |
+| Peak temperature on impact | 1451 K | 448 K |
+
+Weakly bound heavy metals (lead, tin, gold, zinc) already felt less settling gravity in
+proportion to their cohesion per mass, so they would not be crushed under their own weight. They
+now fall more slowly still: lead takes about 2.7 times as long as iron.
+
+### Solids floating on liquids
+
+Found while weakening gravity: liquids and solids felt different settling gravity (650 and 110).
+As a result, an iron lump floated on water, sitting on the surface about half submerged, and
+lead floated too. Lowering gravity for solids alone would have made this worse. Now a solid that
+reaches into a liquid feels the liquid's settling force. The whole lump does, through every coarse
+cell it fills that connects to the liquid. Whether it sinks is then decided by density.
+
+| In 1500 water molecules | Before | After |
+| --- | --- | --- |
+| Iron | Floats at the surface | Sinks to the floor |
+| Gold | Floats at the surface | Sinks to the floor |
+| Lead | Floats at the surface | Sinks to about 180 units above the floor, held up by water underneath |
+
+What's left: lead, and above all mercury, still feel a reduced settling force in a liquid. Lead
+and tin are crushed flat under full liquid-strength gravity. Liquid mercury's settling force is
+about 1/16 of water's, so it floats on water.
 
 ---
 

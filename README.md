@@ -232,8 +232,12 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   the hand carries its weight. Heat exchange with the plate, the glass and the air is not
   friction: liquids and solids exchange heat about their own flow, so nothing brakes a falling
   or thrown lump before it lands; only what touches the glass or the floor is held back by it.
-  The settling force is far stronger than real gravity, so a lump dropped from the top of the jar
-  lands fast enough to flash hot for a moment. The glass walls and floor attract
+  The settling force is far stronger than real gravity. A solid falling through gas feels a far
+  gentler one than a liquid (about 1/30), so a lump dropped from the top of the jar takes a
+  dozen or so simulated seconds to fall and lands whole, warming by about 150 K for a moment;
+  weakly bound heavy metals (lead, tin) fall more gently still. Immersed in a liquid, a solid
+  feels the liquid's settling force instead, so density decides whether it sinks or floats: iron
+  and gold sink in water. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
