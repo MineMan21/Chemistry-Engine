@@ -363,16 +363,16 @@ function ironLump(seed) {
     broken: function () { let b = 0; pairs.forEach(function (p) { if (Math.hypot(sim.x[p[1]] - sim.x[p[0]], sim.y[p[1]] - sim.y[p[0]]) > 1.4 * p[2]) b++; }); return b; } };
 }
 
-test('a dropped lump of iron lands without being squashed', function () {
-  // The jar's settling force is far stronger than real gravity, so the lump hits the floor at a
-  // few hundred units/s (about rifle-bullet speed in the real-world jar); iron's directional
-  // bonding keeps it from flattening. (Without it about a quarter of its contacts rearranged.)
+test('a lump of iron dropped from the top of the jar lands whole, and sinks in water', function () {
+  // Settling gravity is far stronger than real gravity; for a solid falling through gas it is
+  // gentle enough that the lump lands at a few times the thermal speed of its atoms (at the
+  // liquids' strength it hit the floor hot enough to glow and spread out).
   const sim = newSim(3);
   const fe = Z('Fe');
-  sim.addMoles(fe, 0.3, P.W / 2, 900);
+  sim.addMoles(fe, 0.3, P.W / 2, 250);
   const n = sim.n, r2 = 2.8 * CE.elements[fe].radius;
-  let pairs = null;
-  for (let k = 0; k < 9000; k += 10) {
+  let pairs = null, landed = -1;
+  for (let k = 0; k < 30000 && (landed < 0 || k < landed + 3000); k += 10) {
     sim.step(10);
     let bottom = 0;
     for (let i = 0; i < n; i++) bottom = Math.max(bottom, sim.y[i]);
@@ -383,10 +383,27 @@ test('a dropped lump of iron lands without being squashed', function () {
         if (d < r2) pairs.push([i, j, d]);
       }
     }
+    if (pairs && landed < 0 && P.H - bottom < 20) landed = k;
   }
-  assert.ok(pairs, 'the lump reached the floor');
+  assert.ok(landed >= 0, 'the lump reached the floor');
   const moved = pairs.filter(function (q) { return Math.hypot(sim.x[q[1]] - sim.x[q[0]], sim.y[q[1]] - sim.y[q[0]]) > 1.3 * q[2]; }).length;
-  assert.ok(moved < 0.2 * pairs.length, 'contacts rearranged on landing: ' + (100 * moved / pairs.length).toFixed(1) + '%');
+  assert.ok(moved < 0.06 * pairs.length, 'contacts rearranged on landing: ' + (100 * moved / pairs.length).toFixed(1) + '%');
+  // in a liquid a solid feels the liquid's gravity, so the denser one sinks (it used to float)
+  const H2O = { atoms: [[Z('O'), 0, 0], [Z('H'), 9.7, 0], [Z('H'), -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const wet = newSim(4);
+  wet.addMolecules(H2O, 700, P.W / 2, P.H - 150, { x: 2200, y: 250 });
+  run(wet, 3);
+  const n0 = wet.n;
+  wet.addMoles(fe, 0.05, P.W / 2, P.H - 500);
+  run(wet, 8);
+  // (the surface: a few molecules higher up cling to the glass)
+  const ys = [];
+  for (let i = 0; i < n0; i++) if (wet.el[i] === Z('O') && wet.condF[i] > 0.5) ys.push(wet.y[i]);
+  ys.sort(function (a, b) { return a - b; });
+  const top = ys[Math.floor(0.05 * ys.length)];
+  let bottomFe = 0;
+  for (let i = n0; i < wet.n; i++) bottomFe = Math.max(bottomFe, wet.y[i]);
+  assert.ok(P.H - bottomFe < 0.4 * (P.H - top), 'iron sinks to the bottom of the water: its lowest atom ' + Math.round(P.H - bottomFe) + ' above the floor, water ' + Math.round(P.H - top) + ' deep');
 });
 
 test('solid iron is strong: grabbed by a small patch the whole lump comes along', function () {

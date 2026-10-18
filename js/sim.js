@@ -109,9 +109,11 @@
     METAL_G_EPS_PER_MP: 2.2, // (see metalG)
     METAL_G_REF: 45, // pair well per mass (K/u) at and above which a metal feels full settling force
     G_GAS: 1, // gravity felt by isolated (gas) particles
-    G_CONDENSED: 650,
-    G_SOLID: 110, // gentler settling for solids, so a lump keeps its shape instead of being
-    // crushed flat by its own weight (molecular-scale gravity this strong would exceed cohesion) // extra gravity for particles touching others (liquids/solids settle)
+    G_CONDENSED: 650, // extra gravity for packed particles (liquids and solids settle)...
+    G_SOLID: 20, // ...far gentler for a solid falling through gas: a lump dropped from the top of
+    // the jar lands at a few times the thermal speed of its atoms, not tens (an impact that
+    // dents it; real gravity is negligible on this scale). Immersed in a liquid, a solid feels the
+    // liquid's gravity instead (buoyancy; see integrate)
     G_EASE: 0.01, // fraction of the way the settling force on an atom moves to its new value per substep
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
@@ -1344,6 +1346,13 @@
     // molecules that briefly stick together (strong gravity switching on and off pumps heat in)
     const cndN = this.cellCnd || (this.cellCnd = new Uint16Array(tgw * tgh));
     cndN.fill(0);
+    // packed liquid and packed solid atoms per coarse cell (for buoyancy, below)
+    const tgn = tgw * tgh;
+    const liqN = this.cellLiq || (this.cellLiq = new Uint16Array(tgn));
+    const solN = this.cellSol || (this.cellSol = new Uint16Array(tgn));
+    const wetC = this.cellWet || (this.cellWet = new Uint8Array(tgn));
+    liqN.fill(0); solN.fill(0); wetC.fill(0);
+    const solidF = this.solidF && this.solidF.length >= n ? this.solidF : (this.solidF = new Uint8Array(this.x.length));
     // a molecule settles as a whole: an atom counts as condensed if it or a bonded neighbour
     // touches something; smoothed in time so gravity does not flicker (which would heat liquids)
     const condF = this.condF, MB = P.MAXB;
@@ -1355,6 +1364,7 @@
       // changes gradually both ways: a force that flickers with contacts would pump energy into
       // surface molecules
       condF[i] += condRate * (c - condF[i]);
+      solidF[i] = this.isSolidAtom(i) ? 1 : 0;
     }
     for (let i = 0; i < n; i++) {
       // a held body moves with the hand: it is not part of the flow of what it passes through
@@ -1367,6 +1377,32 @@
       const c3 = (tcy * tgw + tcx) * 3, m = mass[el[i]];
       mom[c3] += m * (x[i] - px[i]); mom[c3 + 1] += m * (y[i] - py[i]); mom[c3 + 2] += m;
       cndN[tcy * tgw + tcx]++;
+      // (an atom of a covalent network still assembling is not a liquid around the rest of it)
+      if (solidF[i] || this.netF[i]) solN[tcy * tgw + tcx]++; else liqN[tcy * tgw + tcx]++;
+    }
+    // Solids fall through gas under far gentler settling gravity than liquids (a lump dropped
+    // from the top of the jar would land fast enough to be dented). In a liquid both must pull
+    // alike, or nothing could sink (iron would float on water): a solid lump that reaches into a
+    // liquid feels the liquid's gravity, all of it, so whether it sinks or floats is decided by
+    // density alone. Wet cells are those holding liquid; the wetness spreads through the cells
+    // the lump fills.
+    {
+      const stack = this._wetStack || (this._wetStack = new Int32Array(tgn));
+      let sp = 0;
+      for (let c = 0; c < tgn; c++) if (liqN[c] >= P.SETTLE_MIN) { wetC[c] = 1; stack[sp++] = c; }
+      while (sp) {
+        const c = stack[--sp], cx = c % tgw, cy = (c - cx) / tgw;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = cy + dy;
+          if (yy < 0 || yy >= tgh) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = cx + dx;
+            if (xx < 0 || xx >= tgw) continue;
+            const c2 = yy * tgw + xx;
+            if (!wetC[c2] && solN[c2] >= 3) { wetC[c2] = 1; stack[sp++] = c2; }
+          }
+        }
+      }
     }
     for (let i = 0; i < n; i++) {
       let vx = x[i] - px[i], vy = y[i] - py[i];
@@ -1376,15 +1412,16 @@
       const c = contacts[i] > 4 ? 4 : contacts[i];
       // settling gravity only for material that is clearly packed (passing gas collisions give
       // a small condF that must not pile the vapour up near the floor)
-      let cs = (condF[i] - 0.5) * 3.3;
+      let cs = (condF[i] - 0.5) * 3.3, gc = P.G_CONDENSED;
       if (cs > 0) {
         let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
         tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
         tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
         const nc = (cndN[tcy * tgw + tcx] - P.SETTLE_MIN) / P.SETTLE_RANGE;
         cs *= nc <= 0 ? 0 : nc >= 1 ? 1 : nc;
+        if (solidF[i] && !wetC[tcy * tgw + tcx]) gc = P.G_SOLID;
       }
-      let g = (this.isSolidAtom(i) ? P.G_SOLID : P.G_CONDENSED) * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
+      let g = gc * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       if (this.nb[i] === 0) g *= metalG[el[i]];
       // the hand carries the weight of what it holds: the patch it grips and the solid body
       // hanging from it (the settling force is far stronger than real gravity on this scale;
