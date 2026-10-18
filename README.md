@@ -204,6 +204,14 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   are held by their ionic bonds, molecular solids by their own attractions, covalent networks
   such as graphite and silicon by their bonds. A member melts when it is hot itself, not merely
   when the gas around it is.
+- **Adding elements.** A solid or liquid element is laid down where it fits in the jar, as a
+  packed lump at its own density (molecules of iodine or astatine side by side). Elements that
+  bond to themselves into a network go down already bonded, as the 2D form of their solid:
+  silicon and germanium as a square net, boron, phosphorus, arsenic and antimony as a honeycomb,
+  carbon as graphite, and sulfur, selenium and tellurium as long zigzag chains joined into
+  loops. While a newly added substance settles in (its first couple of seconds, held near room
+  temperature), it does not react with itself: dropped as a heap of loose atoms, silicon or
+  tellurium used to bond in a frenzy and flash to 10,000 K or more.
 - **Crystals form on screen.** A real crystal reorganises over countless molecular vibrations
   that the time-compressed simulation cannot show one by one, so molecules in a frozen molecular
   solid (below its documented melting point) also make occasional small trial turns and shifts,
@@ -232,12 +240,14 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   the hand carries its weight. Heat exchange with the plate, the glass and the air is not
   friction: liquids and solids exchange heat about their own flow, so nothing brakes a falling
   or thrown lump before it lands; only what touches the glass or the floor is held back by it.
-  The settling force is far stronger than real gravity. A solid falling through gas feels a far
-  gentler one than a liquid (about 1/30), so a lump dropped from the top of the jar takes a
-  dozen or so simulated seconds to fall and lands whole, warming by about 150 K for a moment;
-  weakly bound heavy metals (lead, tin) fall more gently still. Immersed in a liquid, a solid
-  feels the liquid's settling force instead, so density decides whether it sinks or floats: iron
-  and gold sink in water. The glass walls and floor attract
+  The settling force is still far stronger than real gravity, which here is about 2×10⁻¹¹
+  units/s² (1 unit = 10 pm, and one simulated second is about 4×10⁻¹² real seconds, set by the
+  atoms' thermal speeds). On a liquid it is 150 units/s², about 10¹³ times real, enough for water
+  to pool flat in seconds. A solid falling through gas feels 6, about 4×10¹¹ times real, so a lump
+  dropped from the top of the jar takes 20–35 simulated seconds to land and lands whole, warming
+  by 50–150 K for a moment. Weakly bound heavy metals (lead, tin) fall more gently still. Immersed
+  in a liquid, a solid feels the liquid's settling force instead, so density decides whether it
+  sinks or floats: iron, gold and lead sink in water. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.

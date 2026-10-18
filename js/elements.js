@@ -241,7 +241,7 @@
   }
 
   // Elements that naturally exist as diatomic molecules.
-  const DIATOMIC = new Set([1, 7, 8, 9, 17, 35, 53]);
+  const DIATOMIC = new Set([1, 7, 8, 9, 17, 35, 53, 85, 117]); // (astatine and tennessine as the heavier halogens)
 
   CE.elements = list;
   CE.bySymbol = bySymbol;
