@@ -577,9 +577,14 @@
     last = now;
     if (program && sim.time >= program.until) nextStage();
     if (!state.paused && sim.n > 0) {
-      // adaptive sub-stepping: spend ~9 ms per frame on physics (scaled by the speed setting)
-      const budget = 12 * state.speed;
-      const subs = Math.max(1, Math.min(24, Math.floor(budget / Math.max(0.05, state.msPerSub))));
+      // adaptive sub-stepping: physics gets what a 60 fps frame has left after drawing (at least
+      // 4 ms), scaled by the speed setting; a cheap view (zoomed in) leaves more for physics
+      const budget = state.speed * Math.max(4, 15 - (state.overMs || 3));
+      // (whole substeps only: what a frame's budget leaves over is carried to the next, so a jar
+      // whose substep takes 7 ms gets its 1.3 substeps a frame on average, not 1)
+      state.stepCredit = Math.min(2, (state.stepCredit || 0) + budget / Math.max(0.05, state.msPerSub));
+      const subs = Math.max(1, Math.min(24, Math.floor(state.stepCredit)));
+      state.stepCredit -= subs;
       const t0 = performance.now();
       sim.step(subs);
       // simulated seconds per real second, smoothed
@@ -590,6 +595,7 @@
       sim.step(1); // keep gauges / gas can alive in an empty jar
     }
     state.frame++;
+    const tDraw = performance.now();
     if (state.frame % 10 === 0) {
       sim.analyze();
       if (state.frame % 30 === 0) { refreshContents(); updatePhaseMarker(); }
@@ -598,6 +604,8 @@
     renderer.draw(dt);
     updateModeUI();
     updateInspector();
+    // the rest of the frame's work (drawing, analysis, panels), smoothed
+    state.overMs = (state.overMs || 3) * 0.9 + 0.1 * (performance.now() - tDraw);
     requestAnimationFrame(frame);
   }
 

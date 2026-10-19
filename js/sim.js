@@ -1188,7 +1188,9 @@
   // every substep (most of whose pairs are out of reach). The reach is the pair's own short-range
   // cutoff, or for two free metal atoms or two ions their long-range one: the lists are rebuilt
   // when an atom gains or loses that status, and when atoms are added or removed.
-  function longRangeFlag(sim, i) { return (isMetal[sim.el[i]] && !sim.nb[i] ? 1 : 0) | (sim.ion[i] ? 2 : 0); }
+  // (bits 1 and 2: free metal atom, ion, the long-range kinds; bit 4: water oxygen, whose two
+  // water terms reach WATER_RANGE: the lists also keep the water oxygens' pairs out to there)
+  function longRangeFlag(sim, i) { return (isMetal[sim.el[i]] && !sim.nb[i] ? 1 : 0) | (sim.ion[i] ? 2 : 0) | (sim.isWaterO(i) ? 4 : 0); }
   S.neighboursStale = function () {
     const n = this.n;
     if (this.nlTopo !== this.topo || this.nlN !== n || this.nlCell !== this.cellSize || this.nlReach !== this.reach) return true;
@@ -1206,10 +1208,15 @@
     const ls = this.nlStart || (this.nlStart = new Int32Array(cap + 1));
     let lj = this.nlJ || (this.nlJ = new Int32Array(32 * cap));
     for (let i = 0; i < n; i++) { bx[i] = x[i]; by[i] = y[i]; fl[i] = longRangeFlag(this, i); }
+    let anyW = false;
+    for (let i = 0; i < n && !anyW; i++) if (fl[i] & 4) anyW = true;
     const skin = P.NBR_SKIN, long2 = (this.reach + skin) * (this.reach + skin);
+    const WR = Math.max(P.W2_RANGE, P.W3_RANGE) + skin, w2c = WR * WR;
+    const far = Math.max(this.reach + skin, anyW ? WR : 0), far2 = far * far;
     const cs = this.cellSize, gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems, cellOf = this.cellOf;
-    const ring = Math.ceil((this.reach + skin) / cs);
-    let m = 0;
+    const ring = Math.ceil(far / cs);
+    let wi = this.nlWI || (this.nlWI = new Int32Array(8 * cap)), wj = this.nlWJ || (this.nlWJ = new Int32Array(8 * cap));
+    let m = 0, mw = 0;
     for (let i = 0; i < n; i++) {
       ls[i] = m;
       const xi = x[i], yi = y[i], ei = el[i], fi = fl[i], c = cellOf[i], cx = c % gw, cy = (c - cx) / gw;
@@ -1226,8 +1233,17 @@
             const j = items[b];
             if (own && j <= i) continue;
             const ddx = x[j] - xi, ddy = y[j] - yi, d2 = ddx * ddx + ddy * ddy;
+            if (d2 >= far2) continue;
+            const fj = fl[j];
+            if (fi & fj & 4 && d2 < w2c) {
+              if (mw >= wi.length) {
+                const g1 = new Int32Array(wi.length * 2), g2 = new Int32Array(wi.length * 2);
+                g1.set(wi); g2.set(wj); wi = this.nlWI = g1; wj = this.nlWJ = g2;
+              }
+              wi[mw] = i; wj[mw++] = j;
+            }
             let cut2 = long2;
-            if (!(fi & fl[j])) { const rc = pairRc[ei * NZ + el[j]] + skin; cut2 = rc * rc; }
+            if (!(fi & fj & 3)) { const rc = pairRc[ei * NZ + el[j]] + skin; cut2 = rc * rc; }
             if (d2 >= cut2) continue;
             if (m >= lj.length) { const g = new Int32Array(lj.length * 2); g.set(lj); lj = this.nlJ = g; }
             lj[m++] = j;
@@ -1236,6 +1252,7 @@
       }
     }
     ls[n] = m;
+    this.nlW = mw;
     this.nlTopo = this.topo; this.nlN = n; this.nlCell = this.cellSize; this.nlReach = this.reach;
   };
 
@@ -2464,40 +2481,36 @@
   // grid built this substep, and shared by the two.
   S.waterForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy;
-    const isW = this.wIs || (this.wIs = new Uint8Array(P.MAX));
+    // (the neighbour lists are current, so their flags say which atoms are water oxygens, and
+    // their water pairs include every pair now within reach)
+    const isW = this.wIs || (this.wIs = new Uint8Array(P.MAX)), fl = this.nlF;
     let nw = 0;
-    for (let i = 0; i < n; i++) { const w = this.isWaterO(i) ? 1 : 0; isW[i] = w; nw += w; }
+    for (let i = 0; i < n; i++) { const w = fl[i] & 4 ? 1 : 0; isW[i] = w; nw += w; }
     if (!nw) return;
     const R = Math.max(P.W2_RANGE, P.W3_RANGE), R2 = R * R;
-    const cs = this.cellSize, gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
-    const ring = Math.ceil(R / cs);
-    const ns = this.wNS || (this.wNS = new Int32Array(P.MAX + 1));
-    if (!this.wNJ || this.wNJ.length < 16 * nw) {
-      const cap = 24 * nw;
-      this.wNJ = new Int32Array(cap); this.wNX = new Float64Array(cap); this.wNY = new Float64Array(cap); this.wND = new Float64Array(cap);
+    const ns = this.wNS || (this.wNS = new Int32Array(P.MAX + 1)), cnt = this.wCnt || (this.wCnt = new Int32Array(P.MAX + 1));
+    const WI = this.nlWI, WJ = this.nlWJ, mw = this.nlW;
+    // each pair in reach, once from each end: count, then place
+    const keep = this.wKeep && this.wKeep.length >= mw ? this.wKeep : (this.wKeep = new Uint8Array(Math.max(mw, 16) * 2));
+    cnt.fill(0, 0, n + 1);
+    for (let q = 0; q < mw; q++) {
+      const i = WI[q], j = WJ[q], dx = x[j] - x[i], dy = y[j] - y[i];
+      if (dx * dx + dy * dy < R2) { keep[q] = 1; cnt[i]++; cnt[j]++; } else keep[q] = 0;
     }
-    let nj = this.wNJ, nx = this.wNX, ny = this.wNY, nd = this.wND, m = 0;
-    for (let i = 0; i < n; i++) {
-      ns[i] = m;
-      if (!isW[i]) continue;
-      const xi = x[i], yi = y[i], c = this.cellOf[i], cx = c % gw, cy = (c - cx) / gw;
-      for (let yy = Math.max(0, cy - ring); yy <= Math.min(gh - 1, cy + ring); yy++) {
-        for (let xx = Math.max(0, cx - ring); xx <= Math.min(gw - 1, cx + ring); xx++) {
-          const c2 = yy * gw + xx;
-          for (let b = start[c2]; b < start[c2 + 1]; b++) {
-            const j = items[b];
-            if (j === i || !isW[j]) continue;
-            const dx = x[j] - xi, dy = y[j] - yi, d2 = dx * dx + dy * dy;
-            if (d2 >= R2) continue;
-            if (m >= nj.length) {
-              const grow = function (a, T) { const b2 = new T(a.length * 2); b2.set(a); return b2; };
-              nj = this.wNJ = grow(nj, Int32Array); nx = this.wNX = grow(nx, Float64Array);
-              ny = this.wNY = grow(ny, Float64Array); nd = this.wND = grow(nd, Float64Array);
-            }
-            nj[m] = j; nx[m] = dx; ny[m] = dy; nd[m] = Math.sqrt(d2) || 1e-6; m++;
-          }
-        }
-      }
+    let m = 0;
+    for (let i = 0; i < n; i++) { ns[i] = m; m += cnt[i]; cnt[i] = ns[i]; }
+    if (!this.wNJ || this.wNJ.length < m) {
+      const capw = Math.max(2 * m, 64);
+      this.wNJ = new Int32Array(capw); this.wNX = new Float64Array(capw); this.wNY = new Float64Array(capw); this.wND = new Float64Array(capw);
+    }
+    const nj = this.wNJ, nx = this.wNX, ny = this.wNY, nd = this.wND;
+    for (let q = 0; q < mw; q++) {
+      if (!keep[q]) continue;
+      const i = WI[q], j = WJ[q], dx = x[j] - x[i], dy = y[j] - y[i], d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      let a = cnt[i]++;
+      nj[a] = j; nx[a] = dx; ny[a] = dy; nd[a] = d;
+      a = cnt[j]++;
+      nj[a] = i; nx[a] = -dx; ny[a] = -dy; nd[a] = d;
     }
     ns[n] = m;
     if (P.W2_EPS) {
