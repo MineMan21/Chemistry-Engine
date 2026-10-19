@@ -623,7 +623,8 @@ function liftAndThrow(seed, setup) {
   lump.forEach(function (i) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / lump.length; });
   const y0 = lump.map(function (i) { return sim.y[i]; });
   sim.grabStart(cx, top + 20, 120);
-  let steps = Math.round(3 / P.DT);
+  // (a lump of heavy atoms follows the hand more slowly: at most an iron atom's energy per atom)
+  let steps = Math.round(5 / P.DT);
   for (let s = 0; s < steps; s += 6) { sim.grabMove(cx, top + 20 - 700 * Math.min(1, s / (0.67 * steps))); sim.step(6); }
   let rose = 0;
   lump.forEach(function (i, k) { if (sim.y[i] < y0[k] - 500) rose++; });
@@ -646,6 +647,33 @@ function liftAndThrow(seed, setup) {
   lump.forEach(function (i) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); });
   return { rose: rose / lump.length, piece: Math.max.apply(null, Array.from(size.values())) / lump.length };
 }
+
+test('tungsten thrown at the glass lands whole: a lump of heavy atoms leaves the hand slower', function () {
+  // At the hand's top speed a tungsten atom (3.3x iron's mass) carried 3.3x the energy into the
+  // glass, against bonds only ~2x as strong, and tungsten came out worse than iron
+  const sim = newSim(40), w = Z('W');
+  sim.addMoles(w, 0.3, P.W / 2, P.H - 150);
+  run(sim, 6);
+  const n = sim.n;
+  let top = P.H, cx = 0;
+  for (let i = 0; i < n; i++) { top = Math.min(top, sim.y[i]); cx += sim.x[i] / n; }
+  sim.grabStart(cx, top + 20, 120);
+  for (let s = 0, steps = Math.round(3 / P.DT); s < steps; s += 6) { sim.grabMove(cx, top + 20 - 700 * Math.min(1, s / (0.67 * steps))); sim.step(6); }
+  const r2 = 2.8 * CE.elements[w].radius, pairs = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const d = Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]); if (d < r2) pairs.push([i, j, d]); }
+  let vmax = 0;
+  for (let s = 0, steps = Math.round(0.4 / P.DT); s < steps; s += 6) {
+    sim.grabMove(cx - (cx - 300) * s / steps, top - 680); sim.step(6);
+    let vx = 0;
+    for (let i = 0; i < n; i++) vx += (sim.x[i] - sim.px[i]) / P.DT / n;
+    vmax = Math.max(vmax, -vx);
+  }
+  sim.grabEnd();
+  run(sim, 3);
+  assert.ok(vmax > 120 && vmax < 200, 'tungsten thrown at ' + Math.round(vmax) + ' units/s');
+  const moved = pairs.filter(function (q) { return Math.hypot(sim.x[q[1]] - sim.x[q[0]], sim.y[q[1]] - sim.y[q[0]]) > 1.3 * q[2]; }).length;
+  assert.ok(moved < 0.01 * pairs.length, 'contacts rearranged by the impact: ' + (100 * moved / pairs.length).toFixed(1) + '%');
+});
 
 test('lumps of lead and graphite come up whole when grabbed and survive a throw', function () {
   const lead = liftAndThrow(40, function (sim) { sim.addMoles(Z('Pb'), 0.3, P.W / 2, P.H - 150); });

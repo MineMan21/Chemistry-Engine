@@ -292,7 +292,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   it along by the patch it touches (which would stretch and warm a lump that real handling never
   could). A solid thrown at the glass at the hand's top speed hits it at roughly the speed of a
   rifle bullet, so it warms (metals, salts, MgO and graphite stay whole; sulfur and iodine
-  crumble). Silicon, almost fully rigid in 2D, reads too cold.
+  crumble). The hand gives each atom at most the motion energy of an iron atom at its top speed,
+  so a lump of heavier atoms is thrown slower, as an arm throws a heavier ball: tungsten, lead
+  and gold leave the hand at about 155–165 units/s instead of 300, and land whole where iron
+  dents slightly. Metal hardness otherwise follows the melting point only. Silicon, almost fully rigid in 2D, reads too cold.
 - Integration: a substep of 1 ms is short enough to follow a metal lattice's vibrations, so a
   lump left alone in an insulated jar keeps its temperature to a couple of kelvin per second.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry
