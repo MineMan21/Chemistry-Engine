@@ -17,7 +17,8 @@ but numbers or timing are far off. **Low** means a cosmetic or data issue.
 
 Each issue now carries a **Status** from the fix pass that followed this review: **Fixed**,
 **Improved** (better, not yet right) or **Open**. Regression tests for the fixes are in
-`tests/sim.test.js`.
+`tests/sim.test.js`. Any new problem found while working on the sandbox is added to the table
+below as soon as it is found, even if it is not fixed.
 
 ---
 
@@ -31,6 +32,12 @@ Each issue now carries a **Status** from the fix pass that followed this review:
 | D | Dropped iron (and tungsten) dents; metals too malleable | **Fixed**: directional bonding, and much gentler gravity for falling solids; see below |
 | B | Solids float on liquids (iron on water) | **Fixed** for iron, gold and lead; liquid mercury now sinks partway: see below |
 | E | Elements dropped on their own misbehave (silicon, sulfur, tellurium flash to 10⁴ K; silicon hangs in mid-air; sodium splats) | **Fixed** for 86 of the 96 solid elements: see "Every element dropped" below |
+| E1 | Rubidium, caesium and francium (1 mol) are as wide as the jar, drift partly as vapour and do not land within 60 s | Open: see "Every element dropped" |
+| E2 | Potassium and gallium, just below their melting points, splash on landing (22–30% of contacts rearranged) | Open |
+| E3 | Iodine, astatine, tennessine and oganesson fall apart: crystals held only by dispersion forces are too weak in 2D | Open |
+| E4 | Silicon and germanium read ~100 K at room temperature; sulfur, selenium and tellurium read 500–570 K after landing (temperature of nearly rigid networks and chains) | Open |
+| E5 | Liquid mercury only partly sinks in water (its settling force is capped at ~1/4 of water's); solids neither float nor sink properly in a liquid metal | Open |
+| E6 | Falling liquids and solids still warm on landing (water ~150–220 K, solids 50–150 K for a moment), because settling gravity is ~10¹¹–10¹³ times real | Open: inherent to the exaggerated gravity |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
