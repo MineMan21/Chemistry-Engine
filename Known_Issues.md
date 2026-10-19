@@ -38,6 +38,7 @@ below as soon as it is found, even if it is not fixed.
 | E4 | Silicon and germanium read ~100 K at room temperature; sulfur, selenium and tellurium read 500–570 K after landing (temperature of nearly rigid networks and chains) | Open |
 | E5 | Liquid mercury only partly sinks in water (its settling force is capped at ~1/4 of water's); solids neither float nor sink properly in a liquid metal | Open |
 | E6 | Falling liquids and solids still warm on landing (water ~150–220 K, solids 50–150 K for a moment), because settling gravity is ~10¹¹–10¹³ times real | Open: inherent to the exaggerated gravity |
+| E7 | Molten gallium at 340 K (37 K above its melting point) keeps 10–15% of its atoms in ordered patches; whether a run reads below 10% depends on the random seed | Open |
 | G | Solids break when grabbed or thrown; moving them heats them | **Fixed** except iodine and sulfur: see the table below |
 | 1 | CO polymerises at room temperature | **Fixed** |
 | 2 | Hydrocarbon flames never reach CO₂ | Open |
@@ -64,6 +65,8 @@ below as soon as it is found, even if it is not fixed.
 | 23 | Presets add less than they ask for | **Fixed** |
 | 24 | No glow from hot materials | **Fixed** |
 | 25 | Data inconsistencies | **Fixed** (except NaH's bond class) |
+| 26 | Iron in 0.6 mol of chlorine ignites by itself at room temperature after 6–12 s in a dry jar (to ~1200–1600 K, FeCl/FeCl₂/FeCl₃); issue 5's fix holds for small amounts only. With water in the jar it stays at a couple of Fe–Cl bonds | Open (found while checking the gas rendering) |
+| 27 | About a third of 0.6 mol of chlorine counts as condensed at room temperature (clinging to the iron and the glass), though Cl₂ boils at 239 K | Open |
 
 ### Root causes found during the fix pass
 

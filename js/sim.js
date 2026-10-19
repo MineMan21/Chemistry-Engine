@@ -180,6 +180,7 @@
     FRESH: 30, // substeps of softened repulsion after an atom is created or changes bonds
     BOND_RAMP: 0.5, // units per substep a new/changed bond moves toward its rest length
     SHAKE_ITERS: 3, // constraint solver iterations per substep
+    NBR_SKIN: 12, // margin (units) of the force neighbour lists: rebuilt once an atom moves half of it
     MIN_DYN_MASS: 3 // minimum dynamical mass (u), see below
   };
   const ENERGY_PER_KJ = P.KB / P.R_KJ; // sim energy units per kJ/mol
@@ -423,6 +424,7 @@
   S.addAtom = function (z, x, y, T, tag) {
     if (this.n >= P.MAX) return -1;
     const i = this.n++;
+    this.topo = (this.topo || 0) + 1; // (the neighbour lists must be rebuilt)
     const sd = Math.sqrt(P.KB * (T || P.AMBIENT) / mass[z]) * P.DT;
     this.x[i] = x; this.y[i] = y;
     this.px[i] = x - gaussian(this.rng) * sd;
@@ -826,6 +828,7 @@
 
   S.clear = function () {
     this.n = 0;
+    this.topo = (this.topo || 0) + 1;
     this.grains = [];
     this.grabEnd();
     this.tCell.fill(this.plateTemp);
@@ -837,6 +840,7 @@
   // Removes particle i (breaking its bonds) by swapping the last particle into its slot.
   S.removeParticle = function (i) {
     const MB = P.MAXB;
+    this.topo = (this.topo || 0) + 1; // (indices change: the neighbour lists must be rebuilt)
     if (this.grainOf[i] >= 0) this.crystalEject(i);
     if (this.grab) this.grabRenumber(i, this.n - 1);
     this._removing = true;
@@ -1086,7 +1090,7 @@
   // ---------------------------------------------------------------------------------------
   // The cells are as wide as the short-range forces every atom feels reach; the few long-range
   // pairs (the many-body attraction between metal atoms, Coulomb between ions) look further, over
-  // a wider ring of cells (see computeForces), so a little metal or salt in the jar does not make
+  // a wider ring of cells (see buildNeighbours), so a little metal or salt in the jar does not make
   // every water molecule check a neighbourhood four times the area its forces need. reach is the
   // furthest any force present reaches (for searches around an atom).
   S.updateGrid = function () {
@@ -1107,7 +1111,6 @@
     }
     this.reach = Math.ceil(Math.max(shortRc, longRc));
     this.cellSize = this.gridWide ? this.reach : Math.ceil(shortRc);
-    this.ring = Math.ceil(this.reach / this.cellSize);
     this.gridW = Math.ceil(P.W / this.cellSize) + 1;
     this.gridH = Math.ceil(P.H / this.cellSize) + 1;
     const cells = this.gridW * this.gridH;
@@ -1174,11 +1177,67 @@
   // ---------------------------------------------------------------------------------------
   // Forces
   // ---------------------------------------------------------------------------------------
+  // Neighbour lists (Verlet lists): each atom's later partners within reach of their forces plus
+  // a margin, found from the grid. Until an atom has moved half the margin, no pair outside the
+  // lists can have come within reach, so the lists stand in for scanning the neighbouring cells
+  // every substep (most of whose pairs are out of reach). The reach is the pair's own short-range
+  // cutoff, or for two free metal atoms or two ions their long-range one: the lists are rebuilt
+  // when an atom gains or loses that status, and when atoms are added or removed.
+  function longRangeFlag(sim, i) { return (isMetal[sim.el[i]] && !sim.nb[i] ? 1 : 0) | (sim.ion[i] ? 2 : 0); }
+  S.neighboursStale = function () {
+    const n = this.n;
+    if (this.nlTopo !== this.topo || this.nlN !== n || this.nlCell !== this.cellSize || this.nlReach !== this.reach) return true;
+    const x = this.x, y = this.y, bx = this.nlX, by = this.nlY, fl = this.nlF, lim = 0.25 * P.NBR_SKIN * P.NBR_SKIN;
+    for (let i = 0; i < n; i++) {
+      const dx = x[i] - bx[i], dy = y[i] - by[i];
+      if (dx * dx + dy * dy > lim || longRangeFlag(this, i) !== fl[i]) return true;
+    }
+    return false;
+  };
+  S.buildNeighbours = function () {
+    const n = this.n, x = this.x, y = this.y, el = this.el, cap = this.x.length;
+    const bx = this.nlX || (this.nlX = new Float64Array(cap)), by = this.nlY || (this.nlY = new Float64Array(cap));
+    const fl = this.nlF || (this.nlF = new Uint8Array(cap));
+    const ls = this.nlStart || (this.nlStart = new Int32Array(cap + 1));
+    let lj = this.nlJ || (this.nlJ = new Int32Array(32 * cap));
+    for (let i = 0; i < n; i++) { bx[i] = x[i]; by[i] = y[i]; fl[i] = longRangeFlag(this, i); }
+    const skin = P.NBR_SKIN, long2 = (this.reach + skin) * (this.reach + skin);
+    const cs = this.cellSize, gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems, cellOf = this.cellOf;
+    const ring = Math.ceil((this.reach + skin) / cs);
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      ls[i] = m;
+      const xi = x[i], yi = y[i], ei = el[i], fi = fl[i], c = cellOf[i], cx = c % gw, cy = (c - cx) / gw;
+      // forward half of the cells around: the atom's own (later partners only), then right, then
+      // the rows below
+      for (let dy = 0; dy <= ring; dy++) {
+        const yy = cy + dy;
+        if (yy >= gh) break;
+        for (let dx = dy ? -ring : 0; dx <= ring; dx++) {
+          const xx = cx + dx;
+          if (xx < 0 || xx >= gw) continue;
+          const c2 = yy * gw + xx, own = !dx && !dy;
+          for (let b = start[c2]; b < start[c2 + 1]; b++) {
+            const j = items[b];
+            if (own && j <= i) continue;
+            const ddx = x[j] - xi, ddy = y[j] - yi, d2 = ddx * ddx + ddy * ddy;
+            let cut2 = long2;
+            if (!(fi & fl[j])) { const rc = pairRc[ei * NZ + el[j]] + skin; cut2 = rc * rc; }
+            if (d2 >= cut2) continue;
+            if (m >= lj.length) { const g = new Int32Array(lj.length * 2); g.set(lj); lj = this.nlJ = g; }
+            lj[m++] = j;
+          }
+        }
+      }
+    }
+    ls[n] = m;
+    this.nlTopo = this.topo; this.nlN = n; this.nlCell = this.cellSize; this.nlReach = this.reach;
+  };
+
   S.computeForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, el = this.el;
     const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used, ion = this.ion, coh = this.coh;
     const bp = this.bp, MB = P.MAXB;
-    const gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
     fx.fill(0, 0, n); fy.fill(0, 0, n);
     contacts.fill(0, 0, n);
     this.nCand = 0;
@@ -1379,52 +1438,10 @@
       }
     }
 
-    for (let cy = 0; cy < gh; cy++) {
-      for (let cx = 0; cx < gw; cx++) {
-        const c = cy * gw + cx;
-        const s0 = start[c], s1 = start[c + 1];
-        if (s0 === s1) continue;
-        for (let a = s0; a < s1; a++) {
-          const i = items[a];
-          for (let b = a + 1; b < s1; b++) pair(i, items[b]);
-          // forward half-stencil: right, below-left, below, below-right
-          if (cx + 1 < gw) { const c2 = c + 1; for (let b = start[c2]; b < start[c2 + 1]; b++) pair(i, items[b]); }
-          if (cy + 1 < gh) {
-            const r = c + gw;
-            if (cx > 0) for (let b = start[r - 1]; b < start[r]; b++) pair(i, items[b]);
-            for (let b = start[r]; b < start[r + 1]; b++) pair(i, items[b]);
-            if (cx + 1 < gw) for (let b = start[r + 1]; b < start[r + 2]; b++) pair(i, items[b]);
-          }
-        }
-      }
-    }
-    const ring = this.ring;
-    if (ring > 1) {
-      // the long-range pairs (free metal atoms with each other, ions with each other) reach past
-      // the next cell: the rest of the forward half-stencil out to the ring that covers them
-      const lr = this.lrF && this.lrF.length >= n ? this.lrF : (this.lrF = new Uint8Array(this.x.length));
-      let any = 0;
-      for (let i = 0; i < n; i++) { const f = (isMetal[el[i]] && !nb[i] ? 1 : 0) | (ion[i] ? 2 : 0); lr[i] = f; any |= f; }
-      if (any) {
-        const cellOf = this.cellOf;
-        for (let i = 0; i < n; i++) {
-          const fi = lr[i];
-          if (!fi) continue;
-          const c = cellOf[i], cx = c % gw, cy = (c - cx) / gw;
-          for (let dy = 0; dy <= ring; dy++) {
-            const yy = cy + dy;
-            if (yy >= gh) break;
-            for (let dx = dy ? -ring : 2; dx <= ring; dx++) {
-              if (dy <= 1 && dx >= -1 && dx <= 1) continue; // (already paired above)
-              const xx = cx + dx;
-              if (xx < 0 || xx >= gw) continue;
-              const c2 = yy * gw + xx;
-              for (let b = start[c2]; b < start[c2 + 1]; b++) { const j = items[b]; if (lr[j] & fi) pair(i, j); }
-            }
-          }
-        }
-      }
-    }
+    // every pair that may interact, from the neighbour lists (rebuilt when stale)
+    if (this.neighboursStale()) this.buildNeighbours();
+    const ls = this.nlStart, lj = this.nlJ;
+    for (let i = 0; i < n; i++) for (let k = ls[i], k1 = ls[i + 1]; k < k1; k++) pair(i, lj[k]);
     if (nFs) {
       // embedding forces: U = sum F_i(rho_i); on the pair i, j the force is
       // -(F'_i + F'_j) dphi/dr along the pair
@@ -1456,8 +1473,7 @@
         }
       }
     }
-    if (P.W3_EPS) for (let i = 0; i < n; i++) if (this.isWaterO(i)) this.waterAngle(i, true);
-    if (P.W2_EPS) this.waterDenseForces();
+    if (P.W3_EPS || P.W2_EPS) this.waterForces();
     if (this.grains.length) this.crystalForces();
   };
 
@@ -1508,12 +1524,13 @@
     // molecule may touch its neighbours at only a few of its atoms)
     const touch = this._touch && this._touch.length >= n ? this._touch : (this._touch = new Uint8Array(this.x.length));
     for (let i = 0; i < n; i++) touch[i] = contacts[i] >= 2 || this.netF[i] ? 1 : 0;
-    for (let sweep = 0; sweep < 4; sweep++) {
+    for (let sweep = 0, changed = 1; sweep < 4 && changed; sweep++) {
       const fwd = !(sweep & 1);
+      changed = 0;
       for (let q = 0; q < n; q++) {
         const i = fwd ? q : n - 1 - q;
         if (touch[i]) continue;
-        for (let k = 0; k < this.nb[i]; k++) if (touch[this.bp[i * MB + k]]) { touch[i] = 1; break; }
+        for (let k = 0; k < this.nb[i]; k++) if (touch[this.bp[i * MB + k]]) { touch[i] = 1; changed = 1; break; }
       }
     }
     for (let i = 0; i < n; i++) {
@@ -1527,7 +1544,7 @@
         // jiggling past 371 K are not a drop of melt; 2 = not yet decided, for a new atom)
         const mk = meltK[el[i]], tc = tCell[this.cellOfT[i]], s0 = solidF[i];
         solidF[i] = s0 === 2 ? (this.tLoc[i] < mk ? 1 : 0) : s0 ? (tc < 1.12 * mk ? 1 : 0) : (tc < 0.88 * mk ? 1 : 0);
-      } else solidF[i] = this.isSolidAtom(i) ? 1 : 0;
+      } else solidF[i] = (c || condF[i] > 0.5) && this.isSolidAtom(i) ? 1 : 0; // (gas is not solid)
     }
     for (let i = 0; i < n; i++) {
       // a held body moves with the hand: it is not part of the flow of what it passes through
@@ -1694,7 +1711,7 @@
       }
       if (gamma > 0) {
         // Langevin (Ornstein-Uhlenbeck) thermostat towards the wall temperature
-        const c1 = Math.exp(-gamma * dt);
+        const gd = gamma * dt, c1 = gd < 0.05 ? 1 - gd * (1 - gd * (0.5 - gd / 6)) : Math.exp(-gd);
         const sd = Math.sqrt((1 - c1 * c1) * P.KB * Tw * im) * dt;
         // cheap unit-variance noise (sum of 3 uniforms); exact Gaussians are not needed here
         // Heat exchange is not friction: liquids and solids are thermostatted about their own
@@ -2372,9 +2389,10 @@
     const b = i * P.MAXB;
     return this.el[this.bp[b]] === 1 && this.el[this.bp[b + 1]] === 1;
   };
-  // inSet (optional): a stamp array and value; only angle terms involving a stamped atom count
-  S.waterAngle = function (i, forces, inSet, tag) {
-    const rc = P.W3_RANGE, K = P.W3_EPS * P.KB, x = this.x, y = this.y, fx = this.fx, fy = this.fy;
+  // The angle energy around centre i (its forces: waterForces). inSet (optional): a stamp array
+  // and value; only angle terms involving a stamped atom count.
+  S.waterAngle = function (i, inSet, tag) {
+    const rc = P.W3_RANGE, K = P.W3_EPS * P.KB, x = this.x, y = this.y;
     const L = this._w3 || (this._w3 = []);
     L.length = 0;
     const self = this;
@@ -2384,30 +2402,20 @@
     // the angle term), then a smooth fade to zero
     const r1 = P.W3_INNER, iw = 1 / (rc - r1);
     function wt(r) { if (r <= r1) return 1; if (r >= rc) return 0; const g = (r - r1) * iw, h = 1 - g * g; return h * h; }
-    function dwt(r) { if (r <= r1 || r >= rc) return 0; const g = (r - r1) * iw; return -4 * g * (1 - g * g) * iw; }
     for (let p = 0; p < L.length; p++) {
       const j = L[p], ax = x[j] - x[i], ay = y[j] - y[i];
       const ra = Math.sqrt(ax * ax + ay * ay) || 1e-6;
-      const fa = wt(ra), dfa = dwt(ra);
+      const fa = wt(ra);
       if (!fa) continue;
       for (let r = p + 1; r < L.length; r++) {
         const k = L[r];
         if (inSet && inSet[i] !== tag && inSet[j] !== tag && inSet[k] !== tag) continue;
         const bx = x[k] - x[i], by = y[k] - y[i];
         const rb = Math.sqrt(bx * bx + by * by) || 1e-6;
-        const fb = wt(rb), dfb = dwt(rb);
+        const fb = wt(rb);
         if (!fb) continue;
         const c = (ax * bx + ay * by) / (ra * rb), dc = c + 0.5;
         U += K * fa * fb * dc * dc;
-        if (!forces) continue;
-        const kc = 2 * K * fa * fb * dc; // dE/dc
-        const ja = K * dc * dc * fb * dfa / ra, kb = K * dc * dc * fa * dfb / rb; // radial parts
-        const jx = kc * (bx / (ra * rb) - c * ax / (ra * ra)) + ja * ax;
-        const jy = kc * (by / (ra * rb) - c * ay / (ra * ra)) + ja * ay;
-        const kx = kc * (ax / (ra * rb) - c * bx / (rb * rb)) + kb * bx;
-        const ky = kc * (ay / (ra * rb) - c * by / (rb * rb)) + kb * by;
-        fx[j] -= jx; fy[j] -= jy; fx[k] -= kx; fy[k] -= ky;
-        fx[i] += jx + kx; fy[i] += jy + ky;
       }
     }
     return U;
@@ -2430,7 +2438,7 @@
       });
     }
     let U = 0;
-    for (let k = 0; k < centres.length; k++) U += this.waterAngle(centres[k], false, mark, t);
+    for (let k = 0; k < centres.length; k++) U += this.waterAngle(centres[k], mark, t);
     return U;
   };
 
@@ -2446,31 +2454,99 @@
     const t = (r - P.W2_RHO_A) / (P.W2_RHO_B - P.W2_RHO_A);
     return t <= 0 || t >= 1 ? 0 : -P.W2_EPS * P.KB * 6 * t * (1 - t) / (P.W2_RHO_B - P.W2_RHO_A);
   }
-  S.waterDenseForces = function () {
-    const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, self = this;
-    const rho = this.wRho || (this.wRho = new Float64Array(P.MAX));
-    const pi = this.wPI || (this.wPI = []), pj = this.wPJ || (this.wPJ = []), pd = this.wPD || (this.wPD = []);
-    pi.length = pj.length = pd.length = 0;
+  // The forces of both water terms (the network angle, see waterAngle, and the dense-water count
+  // above) in one pass: each oxygen's water-oxygen neighbours are found once, straight from the
+  // grid built this substep, and shared by the two.
+  S.waterForces = function () {
+    const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy;
     const isW = this.wIs || (this.wIs = new Uint8Array(P.MAX));
-    for (let i = 0; i < n; i++) { isW[i] = this.isWaterO(i) ? 1 : 0; rho[i] = 0; }
-    const R = P.W2_RANGE;
-    for (let i = 0; i < n; i++) {
-      if (!isW[i]) continue;
-      this.query(x[i], y[i], R, function (j) {
-        if (j <= i || !isW[j]) return;
-        const dx = x[j] - x[i], dy = y[j] - y[i], d2 = dx * dx + dy * dy;
-        if (d2 >= R * R) return;
-        const d = Math.sqrt(d2) || 1e-6, w = w2(d);
-        rho[i] += w; rho[j] += w;
-        const dw = dw2(d);
-        if (dw) { pi.push(i); pj.push(j); pd.push(dw / d, dx, dy); }
-      });
+    let nw = 0;
+    for (let i = 0; i < n; i++) { const w = this.isWaterO(i) ? 1 : 0; isW[i] = w; nw += w; }
+    if (!nw) return;
+    const R = Math.max(P.W2_RANGE, P.W3_RANGE), R2 = R * R;
+    const cs = this.cellSize, gw = this.gridW, gh = this.gridH, start = this.cellStart, items = this.cellItems;
+    const ring = Math.ceil(R / cs);
+    const ns = this.wNS || (this.wNS = new Int32Array(P.MAX + 1));
+    if (!this.wNJ || this.wNJ.length < 16 * nw) {
+      const cap = 24 * nw;
+      this.wNJ = new Int32Array(cap); this.wNX = new Float64Array(cap); this.wNY = new Float64Array(cap); this.wND = new Float64Array(cap);
     }
-    for (let k = 0; k < pi.length; k++) {
-      const i = pi[k], j = pj[k];
-      const c = (w2dF(rho[i]) + w2dF(rho[j])) * pd[3 * k]; // dU/dr / r
-      const gx = c * pd[3 * k + 1], gy = c * pd[3 * k + 2];
-      fx[j] -= gx; fy[j] -= gy; fx[i] += gx; fy[i] += gy;
+    let nj = this.wNJ, nx = this.wNX, ny = this.wNY, nd = this.wND, m = 0;
+    for (let i = 0; i < n; i++) {
+      ns[i] = m;
+      if (!isW[i]) continue;
+      const xi = x[i], yi = y[i], c = this.cellOf[i], cx = c % gw, cy = (c - cx) / gw;
+      for (let yy = Math.max(0, cy - ring); yy <= Math.min(gh - 1, cy + ring); yy++) {
+        for (let xx = Math.max(0, cx - ring); xx <= Math.min(gw - 1, cx + ring); xx++) {
+          const c2 = yy * gw + xx;
+          for (let b = start[c2]; b < start[c2 + 1]; b++) {
+            const j = items[b];
+            if (j === i || !isW[j]) continue;
+            const dx = x[j] - xi, dy = y[j] - yi, d2 = dx * dx + dy * dy;
+            if (d2 >= R2) continue;
+            if (m >= nj.length) {
+              const grow = function (a, T) { const b2 = new T(a.length * 2); b2.set(a); return b2; };
+              nj = this.wNJ = grow(nj, Int32Array); nx = this.wNX = grow(nx, Float64Array);
+              ny = this.wNY = grow(ny, Float64Array); nd = this.wND = grow(nd, Float64Array);
+            }
+            nj[m] = j; nx[m] = dx; ny[m] = dy; nd[m] = Math.sqrt(d2) || 1e-6; m++;
+          }
+        }
+      }
+    }
+    ns[n] = m;
+    if (P.W2_EPS) {
+      // dense-water cohesion: count each oxygen's neighbours, then the pair forces
+      const rho = this.wRho || (this.wRho = new Float64Array(P.MAX)), dF = this.wDF || (this.wDF = new Float64Array(P.MAX));
+      const r2 = P.W2_RANGE;
+      for (let i = 0; i < n; i++) rho[i] = 0;
+      for (let i = 0; i < n; i++) {
+        if (!isW[i]) continue;
+        for (let q = ns[i]; q < ns[i + 1]; q++) { const j = nj[q]; if (j > i && nd[q] < r2) { const w = w2(nd[q]); rho[i] += w; rho[j] += w; } }
+      }
+      for (let i = 0; i < n; i++) if (isW[i]) dF[i] = w2dF(rho[i]);
+      for (let i = 0; i < n; i++) {
+        if (!isW[i]) continue;
+        for (let q = ns[i]; q < ns[i + 1]; q++) {
+          const j = nj[q];
+          if (j <= i || nd[q] >= r2) continue;
+          const dw = dw2(nd[q]);
+          if (!dw) continue;
+          const c = (dF[i] + dF[j]) * dw / nd[q], gx = c * nx[q], gy = c * ny[q];
+          fx[j] -= gx; fy[j] -= gy; fx[i] += gx; fy[i] += gy;
+        }
+      }
+    }
+    if (P.W3_EPS) {
+      // network angle (see waterAngle): every centre with each pair of its neighbours
+      const rc = P.W3_RANGE, K = P.W3_EPS * P.KB, r1 = P.W3_INNER, iw = 1 / (rc - r1);
+      for (let i = 0; i < n; i++) {
+        if (!isW[i]) continue;
+        const q0 = ns[i], q1 = ns[i + 1];
+        for (let p = q0; p < q1; p++) {
+          const ra = nd[p];
+          if (ra >= rc) continue;
+          const j = nj[p], ax = nx[p], ay = ny[p];
+          let fa = 1, dfa = 0;
+          if (ra > r1) { const g = (ra - r1) * iw, h = 1 - g * g; fa = h * h; dfa = -4 * g * h * iw; }
+          for (let r = p + 1; r < q1; r++) {
+            const rb = nd[r];
+            if (rb >= rc) continue;
+            const k = nj[r], bx = nx[r], by = ny[r];
+            let fb = 1, dfb = 0;
+            if (rb > r1) { const g = (rb - r1) * iw, h = 1 - g * g; fb = h * h; dfb = -4 * g * h * iw; }
+            const c = (ax * bx + ay * by) / (ra * rb), dc = c + 0.5;
+            const kc = 2 * K * fa * fb * dc; // dE/dc
+            const ja = K * dc * dc * fb * dfa / ra, kb = K * dc * dc * fa * dfb / rb; // radial parts
+            const jx = kc * (bx / (ra * rb) - c * ax / (ra * ra)) + ja * ax;
+            const jy = kc * (by / (ra * rb) - c * ay / (ra * ra)) + ja * ay;
+            const kx = kc * (ax / (ra * rb) - c * bx / (rb * rb)) + kb * bx;
+            const ky = kc * (ay / (ra * rb) - c * by / (rb * rb)) + kb * by;
+            fx[j] -= jx; fy[j] -= jy; fx[k] -= kx; fy[k] -= ky;
+            fx[i] += jx + kx; fy[i] += jy + ky;
+          }
+        }
+      }
     }
   };
   // water-oxygen density of i: all neighbours, or only stamped (sign > 0) / unstamped (sign < 0)
