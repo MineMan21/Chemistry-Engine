@@ -54,7 +54,7 @@ below as soon as it is found, even if it is not fixed.
 | 12 | Metal oxides as small gas molecules | **Improved**: rust is a solid scale |
 | 13 | Carbon burns at room temperature | **Fixed** |
 | 14 | No NO from hot N₂ + O₂ | Open |
-| 15 | Network solids never warm up | **Fixed** for graphite; silicon reads low |
+| 15 | Network solids never warm up | **Fixed**: graphite warms (it reads ~1.5x hot, issue 29); silicon reads low |
 | 16 | Gauge reads vapour that isn't there | **Fixed**; Hg and I₂ remain too volatile |
 | 17 | Liquids don't boil above their boiling point | Open |
 | 18 | The jar runs far below the plate | Open |
@@ -68,6 +68,7 @@ below as soon as it is found, even if it is not fixed.
 | 26 | Iron in 0.6 mol of chlorine ignites by itself at room temperature after 6–12 s in a dry jar (to ~1200–1600 K, FeCl/FeCl₂/FeCl₃); issue 5's fix holds for small amounts only. With water in the jar it stays at a couple of Fe–Cl bonds | Open (found while checking the gas rendering) |
 | 27 | About a third of 0.6 mol of chlorine counts as condensed at room temperature (clinging to the iron and the glass), though Cl₂ boils at 239 K | Open |
 | 28 | Metal hardness follows the melting point only: at the same impact speed tungsten (real hardness 5.6x iron's) dents about as much as iron. Thrown by hand, heavy metals now leave the hand slower (equal energy per atom), so tungsten lands whole where iron dents | **Improved**: see "Throwing tungsten" below |
+| 29 | Graphite on an 800 K hot plate (insulated jar) reads 900–1300 K depending on the run, mostly ~1200 K: about 1.5x hot. Its test passed only because its one random seed happened to read 936 K; it now averages three runs | Open |
 
 ### Root causes found during the fix pass
 
