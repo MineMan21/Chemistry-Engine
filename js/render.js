@@ -324,25 +324,32 @@
     const sim = this.sim, n = sim.n, W = P.W, H = P.H;
     const cw = Math.max(6, 2.6 / this.cam.scale); // grid cell in world units (~2.6 screen px)
     const gw = Math.ceil(W / cw), gh = Math.ceil(H / cw), N = gw * gh;
+    // gas is a soft haze: drawn from a grid GF times coarser, scaled up underneath the rest
+    const GF = 4, cg4 = cw * GF, ggw = Math.ceil(W / cg4), ggh = Math.ceil(H / cg4), GN = ggw * ggh;
     if (!this._rg || this._rg.N !== N) {
-      const ch = [];
-      for (let k = 0; k < 11; k++) ch.push(new Float32Array(N));
-      const prev = [];
-      for (let k = 0; k < 11; k++) prev.push(new Float32Array(N));
-      this._rg = { N: N, ch: ch, prev: prev, fresh: true, tmp: new Float32Array(N) };
+      const mk = function (k, len) { const a = []; for (let q = 0; q < k; q++) a.push(new Float32Array(len)); return a; };
+      this._rg = { N: N, ch: mk(7, N), prev: mk(7, N), gch: mk(4, GN), gprev: mk(4, GN), fresh: true,
+        tmp: new Float32Array(N), gtmp: new Float32Array(GN) };
       this.realCanvas = document.createElement('canvas');
       this.realCanvas.width = gw; this.realCanvas.height = gh;
       this.realCtx = this.realCanvas.getContext('2d');
       this.realImg = this.realCtx.createImageData(gw, gh);
+      this.gasCanvas = document.createElement('canvas');
+      this.gasCanvas.width = ggw; this.gasCanvas.height = ggh;
+      this.gasCtx = this.gasCanvas.getContext('2d');
+      this.gasImg = this.gasCtx.createImageData(ggw, ggh);
     }
-    // channels: 0 density, 1-3 colour, 4 opacity, 5 solid, 6 gas strength, 7-9 gas colour, 10 heat
-    const ch = this._rg.ch;
-    for (let k = 0; k < 11; k++) ch[k].fill(0);
-    const [dens, cr, cg, cb, cop, csol, ga, gr, gg, gb, heat] = ch;
+    // channels: density, colour (3), opacity, solid, heat; gas: strength, colour (3)
+    const ch = this._rg.ch, gch = this._rg.gch;
+    for (let k = 0; k < 7; k++) ch[k].fill(0);
+    for (let k = 0; k < 4; k++) gch[k].fill(0);
+    const [dens, cr, cg, cb, cop, csol, heat] = ch;
+    const [ga, gr, gg, gb] = gch;
     const tLoc = sim.tLoc;
     const species = sim.species || [], spIdx = sim.spIdx, x = sim.x, y = sim.y, el = sim.el;
     const area = 1 / (cw * cw);
     const condF = sim.condF;
+    let anyCond = false, anyGas = false;
     for (let i = 0; i < n; i++) {
       const sp = spIdx ? species[spIdx[i]] : null;
       const look = sp && sp.look;
@@ -365,47 +372,65 @@
       const sol = sim.crystalKind(i) || (sim.nb[i] === 1 && sim.isWaterO(sim.bp[i * P.MAXB]))
         ? (sim.isSolidAtom(i) ? 1 : 0) : (look.solid ? 1 : 0);
       const wm = w * wc, wg = w * (1 - wc) * look.gas;
-      for (let k = 0; k < 4; k++) {
-        const b = k & 1 ? tx : 1 - tx, a = k & 2 ? ty : 1 - ty, f = a * b;
-        if (f <= 0) continue;
-        const cc = c + (k & 1) + (k & 2 ? gw : 0);
-        if (wm > 0) {
-          const m = wm * f;
+      if (wm > 0) {
+        anyCond = true;
+        for (let k = 0; k < 4; k++) {
+          const b = k & 1 ? tx : 1 - tx, a = k & 2 ? ty : 1 - ty, f = a * b;
+          if (f <= 0) continue;
+          const cc = c + (k & 1) + (k & 2 ? gw : 0), m = wm * f;
           dens[cc] += m;
           cr[cc] += look.rgb[0] * m; cg[cc] += look.rgb[1] * m; cb[cc] += look.rgb[2] * m;
           cop[cc] += look.opacity * m; csol[cc] += sol * m;
           heat[cc] += tLoc[i] * m;
         }
-        if (wg > 0) {
-          const g = wg * f;
+      }
+      if (wg > 0) {
+        // (on the coarse grid each cell holds GF^2 fine cells' worth: per fine cell, as above)
+        anyGas = true;
+        let qx = x[i] / cg4 - 0.5, qy = y[i] / cg4 - 0.5;
+        qx = qx < 0 ? 0 : qx > ggw - 1.001 ? ggw - 1.001 : qx;
+        qy = qy < 0 ? 0 : qy > ggh - 1.001 ? ggh - 1.001 : qy;
+        const hx = Math.floor(qx), hy = Math.floor(qy), ux = qx - hx, uy = qy - hy, c4 = hy * ggw + hx, g0 = wg / (GF * GF);
+        for (let k = 0; k < 4; k++) {
+          const f = (k & 2 ? uy : 1 - uy) * (k & 1 ? ux : 1 - ux);
+          if (f <= 0) continue;
+          const cc = c4 + (k & 1) + (k & 2 ? ggw : 0), g = g0 * f;
           ga[cc] += g; gr[cc] += look.rgb[0] * g; gg[cc] += look.rgb[1] * g; gb[cc] += look.rgb[2] * g;
         }
       }
     }
     // blur about one atom diameter, so packed atoms (metals sit ~36 units apart) read as one piece
-    const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(3, Math.round(160 / cw));
-    for (let k = 0; k <= 5; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
-    boxBlur(heat, gw, gh, R0, this._rg.tmp); boxBlur(heat, gw, gh, R0, this._rg.tmp);
-    for (let k = 6; k <= 9; k++) { boxBlur(ch[k], gw, gh, RG, this._rg.tmp); boxBlur(ch[k], gw, gh, RG, this._rg.tmp); }
+    // (a picture with no liquid, solid or gas in it skips that blur: it is all zero)
+    const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(1, Math.round(160 / cg4));
+    if (anyCond) for (let k = 0; k < 7; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
+    if (anyGas) for (let k = 0; k < 4; k++) { boxBlur(gch[k], ggw, ggh, RG, this._rg.gtmp); boxBlur(gch[k], ggw, ggh, RG, this._rg.gtmp); }
     // ease toward this frame's picture (time constant ~0.12 s)
-    const prev = this._rg.prev;
+    const prev = this._rg.prev, gprev = this._rg.gprev;
     const ease = this._rg.fresh ? 1 : 1 - Math.exp(-(dt || 0.016) / 0.12);
     this._rg.fresh = false;
-    for (let k = 0; k < 11; k++) {
+    for (let k = 0; k < 7; k++) {
       const a = ch[k], b = prev[k];
       for (let c = 0; c < N; c++) { b[c] += ease * (a[c] - b[c]); a[c] = b[c]; }
+    }
+    for (let k = 0; k < 4; k++) {
+      const a = gch[k], b = gprev[k];
+      for (let c = 0; c < GN; c++) { b[c] += ease * (a[c] - b[c]); a[c] = b[c]; }
+    }
+    // tinted gas
+    const gimg = this.gasImg.data;
+    for (let c = 0; c < GN; c++) {
+      const o = c * 4;
+      if (ga[c] > 1e-4) {
+        gimg[o] = gr[c] / ga[c]; gimg[o + 1] = gg[c] / ga[c]; gimg[o + 2] = gb[c] / ga[c];
+        gimg[o + 3] = Math.min(0.7, ga[c] * 1.6) * 255;
+      } else gimg[o + 3] = 0;
     }
     const img = this.realImg.data;
     for (let gy = 0; gy < gh; gy++) {
       for (let gx = 0; gx < gw; gx++) {
         const c = gy * gw + gx, o = c * 4;
-        // tinted gas
         let R = 0, G = 0, B = 0, A = 0;
-        if (ga[c] > 1e-4) {
-          A = Math.min(0.7, ga[c] * 1.6);
-          R = gr[c] / ga[c]; G = gg[c] / ga[c]; B = gb[c] / ga[c];
-        }
-        // liquids and solids
+        // liquids and solids (drawn over the gas)
         const d = dens[c];
         const cov = smooth(0.3, 0.55, d);
         if (cov > 0) {
@@ -426,17 +451,13 @@
             r += (glow[0] - r) * k; g += (glow[1] - g) * k; b += (glow[2] - b) * k;
             a += (1 - a) * k;
           }
-          // composite the material over the gas
-          const outA = a + A * (1 - a);
-          if (outA > 0) {
-            R = (r * a + R * A * (1 - a)) / outA; G = (g * a + G * A * (1 - a)) / outA; B = (b * a + B * A * (1 - a)) / outA;
-          }
-          A = outA;
+          R = r; G = g; B = b; A = a;
         }
         img[o] = R; img[o + 1] = G; img[o + 2] = B; img[o + 3] = A * 255;
       }
     }
     this.realCtx.putImageData(this.realImg, 0, 0);
+    if (anyGas) this.gasCtx.putImageData(this.gasImg, 0, 0);
     ctx.save();
     ctx.translate(this.width / 2, this.height / 2);
     ctx.scale(this.cam.scale, this.cam.scale);
@@ -444,6 +465,7 @@
     ctx.globalAlpha = alpha;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    if (anyGas) ctx.drawImage(this.gasCanvas, 0, 0, ggw * cg4, ggh * cg4);
     ctx.drawImage(this.realCanvas, 0, 0, gw * cw, gh * cw);
     // glass reflections
     const glare = ctx.createLinearGradient(0, 0, W, 0);
@@ -572,7 +594,9 @@
     return t * t * (3 - 2 * t);
   }
 
-  // In-place separable box blur (running sums), radius r cells.
+  // In-place separable box blur (running sums), radius r cells. The vertical pass keeps one
+  // running sum per column and goes row by row, so it reads and writes memory in order.
+  let colSum = new Float32Array(0);
   function boxBlur(a, w, h, r, tmp) {
     const inv = 1 / (2 * r + 1);
     for (let yy = 0; yy < h; yy++) {
@@ -584,12 +608,18 @@
         sum += a[row + Math.min(w - 1, xx + r + 1)] - a[row + Math.max(0, xx - r)];
       }
     }
-    for (let xx = 0; xx < w; xx++) {
-      let sum = 0;
-      for (let k = -r; k <= r; k++) sum += tmp[Math.min(h - 1, Math.max(0, k)) * w + xx];
-      for (let yy = 0; yy < h; yy++) {
-        a[yy * w + xx] = sum * inv;
-        sum += tmp[Math.min(h - 1, yy + r + 1) * w + xx] - tmp[Math.max(0, yy - r) * w + xx];
+    if (colSum.length < w) colSum = new Float32Array(w);
+    const cs = colSum;
+    cs.fill(0, 0, w);
+    for (let k = -r; k <= r; k++) {
+      const row = Math.min(h - 1, Math.max(0, k)) * w;
+      for (let xx = 0; xx < w; xx++) cs[xx] += tmp[row + xx];
+    }
+    for (let yy = 0; yy < h; yy++) {
+      const out = yy * w, add = Math.min(h - 1, yy + r + 1) * w, sub = Math.max(0, yy - r) * w;
+      for (let xx = 0; xx < w; xx++) {
+        a[out + xx] = cs[xx] * inv;
+        cs[xx] += tmp[add + xx] - tmp[sub + xx];
       }
     }
   }
