@@ -67,6 +67,7 @@ below as soon as it is found, even if it is not fixed.
 | 25 | Data inconsistencies | **Fixed** (except NaH's bond class) |
 | 26 | Iron in 0.6 mol of chlorine ignites by itself at room temperature after 6–12 s in a dry jar (to ~1200–1600 K, FeCl/FeCl₂/FeCl₃); issue 5's fix holds for small amounts only. With water in the jar it stays at a couple of Fe–Cl bonds | Open (found while checking the gas rendering) |
 | 27 | About a third of 0.6 mol of chlorine counts as condensed at room temperature (clinging to the iron and the glass), though Cl₂ boils at 239 K | Open |
+| 28 | Metal hardness follows the melting point only: at the same impact speed tungsten (real hardness 5.6x iron's) dents about as much as iron. Thrown by hand, heavy metals now leave the hand slower (equal energy per atom), so tungsten lands whole where iron dents | **Improved**: see "Throwing tungsten" below |
 
 ### Root causes found during the fix pass
 
@@ -319,6 +320,35 @@ lead and liquid mercury from being squeezed), not a fraction of the liquid's. Wi
 150, lead in water now feels the same pull as the water; mercury keeps the pull it always had,
 about 1/4 of water's now, so it only partly sinks. Molten metal does not count as a liquid around a
 solid lump, so a solid does not float or sink properly in liquid metal (it falls as in gas).
+
+### Throwing tungsten
+
+Reported: tungsten thrown at the glass broke up just like iron, though it should be far tougher.
+
+Cause: the hand threw everything at up to 300 units/s, so a tungsten atom (3.3 times iron's
+mass) hit with 3.3 times the energy, while a metal's bonding, scaled from its melting point, is
+only about twice iron's. Thrown that way, tungsten came out worse than iron: 4.5% of contacts
+rearranged against 3.0%, and 956 K against 427 K. Giving tungsten's directional bonding a larger
+share (from its real hardness, with the pair well lowered to keep its melting point) barely
+helped, at 3.8–4.5%.
+
+What changed: the hand now gives each atom at most the motion energy of an iron atom at 300
+units/s, as an arm throws a heavier ball of the same size slower.
+
+| 0.3 mol lump, lifted and thrown at the glass | Leaves the hand at | Contacts rearranged | Peak temperature |
+| --- | --- | --- | --- |
+| Iron | 300 units/s (unchanged) | 3.0% | 427 K |
+| Tungsten | 164 units/s (was 300) | 0.0% (was 4.5%) | 287 K (was 956 K) |
+| Gold | 158 units/s | 0.0% | 321 K |
+| Lead | 154 units/s (was 300) | 0.0% (was 20.5%) | 302 K (was 1437 K) |
+| Copper | 282 units/s | 1.4% | 475 K |
+| Aluminium | 300 units/s | 1.4% | 354 K |
+
+What's left: damage depends mostly on impact speed (every metal tried stays whole below about
+220 units/s and starts to dent above about 250, tungsten included), not on how hard the metal
+really is. Lead,
+which is very soft, now survives a throw because it is thrown slower; at iron's speed it
+dented badly (20.5%).
 
 ### Every element dropped
 

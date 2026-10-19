@@ -104,6 +104,11 @@
     GRAB_OMEGA: 12, // grab tool: stiffness of the pull toward the hand (1/s)...
     GRAB_MAX_SPEED: 300, // ...the fastest it moves what it holds (units/s; a few times the thermal
     // speed of its atoms, so what it carries through a gas is not scorched by the gas)...
+    GRAB_MAX_KE: 1680, // ...and at most this much motion energy per atom (K): an iron atom's at
+    // that speed. A lump of heavier atoms is thrown slower, as an arm throws a heavier ball of the
+    // same size: at the same speed a tungsten atom (3.3x iron's mass) hit the glass with 3.3x the
+    // energy, against bonds only ~2x as strong, and tungsten came out of a throw more battered
+    // than iron...
     GRAB_MAX_ACCEL: 5000, // ...and how hard it accelerates it (units/s^2): a patch of liquid is
     // pulled out of the pool when its cohesion cannot keep up
     METAL_G_EPS_PER_MP: 2.2, // (see metalG)
@@ -3618,7 +3623,8 @@
     const after = this.grabBody();
     if (before[0] && after[0]) { this.grab.ox += after[1] - before[1]; this.grab.oy += after[2] - before[2]; }
   };
-  // The hand steers what it holds (critically damped, at most GRAB_MAX_ACCEL and GRAB_MAX_SPEED).
+  // The hand steers what it holds (critically damped, at most GRAB_MAX_ACCEL, GRAB_MAX_SPEED and
+  // GRAB_MAX_KE).
   // A solid it holds moves as a whole: the push is shared over the body's atoms like its
   // weight, as it effectively is for anything this small (a real hand accelerates a lump a few
   // nanometres across far too gently to strain its bonds; on this scale its motion is ~1e13
@@ -3644,8 +3650,9 @@
     let ax = w * w * (g.hx + g.ox - b[1]) - 2 * w * (bvx - g.vhx);
     let ay = w * w * (g.hy + g.oy - b[2]) - 2 * w * (bvy - g.vhy);
     const nvx = bvx + ax * P.DT, nvy = bvy + ay * P.DT, nv = Math.hypot(nvx, nvy);
-    if (nv > P.GRAB_MAX_SPEED) {
-      const f = P.GRAB_MAX_SPEED / nv;
+    const vmax = Math.min(P.GRAB_MAX_SPEED, Math.sqrt(2 * P.GRAB_MAX_KE * P.KB * b[5] / b[0]));
+    if (nv > vmax) {
+      const f = vmax / nv;
       ax = (nvx * f - bvx) / P.DT; ay = (nvy * f - bvy) / P.DT;
     }
     const a = Math.hypot(ax, ay);
@@ -3661,13 +3668,13 @@
   // mass, centre and velocity (per substep) of what the hand steers: the body, or the patch
   S.grabBody = function () {
     const g = this.grab, set = g.body.length ? g.body : g.atoms, el = this.el;
-    let M = 0, cx = 0, cy = 0, vx = 0, vy = 0;
+    let M = 0, cx = 0, cy = 0, vx = 0, vy = 0, count = 0;
     for (const i of set) {
       if (i >= this.n) continue;
       const m = mass[el[i]];
-      M += m; cx += m * this.x[i]; cy += m * this.y[i]; vx += m * (this.x[i] - this.px[i]); vy += m * (this.y[i] - this.py[i]);
+      M += m; cx += m * this.x[i]; cy += m * this.y[i]; vx += m * (this.x[i] - this.px[i]); vy += m * (this.y[i] - this.py[i]); count++;
     }
-    return M ? [M, cx / M, cy / M, vx / M, vy / M] : [0, 0, 0, 0, 0];
+    return M ? [M, cx / M, cy / M, vx / M, vy / M, count] : [0, 0, 0, 0, 0, 0];
   };
   // particle `from` moved into slot `to` (to is being removed and from is the last one)
   S.grabRenumber = function (to, from) {
