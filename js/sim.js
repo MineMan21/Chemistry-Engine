@@ -109,6 +109,11 @@
     // same size: at the same speed a tungsten atom (3.3x iron's mass) hit the glass with 3.3x the
     // energy, against bonds only ~2x as strong, and tungsten came out of a throw more battered
     // than iron...
+    THROWN_TIME: 4, // s after the hand lets go of a solid during which it counts as thrown (capHeldHeat)
+    SALT_MELT_GUESS: 1000, // melting point (K) taken for a compound with no data (salts, oxides)
+    GRAB_PRESS_SPEED: 30, // ...and once it touches the glass, presses it on no faster than this (units/s)
+    GRAB_HEAT_CAP: 0.8, // a solid the hand pushes into the glass heats up to at most this share of
+    // its melting point (hot enough to be worked into a new shape, not to melt): see capHeldHeat
     GRAB_MAX_ACCEL: 5000, // ...and how hard it accelerates it (units/s^2): a patch of liquid is
     // pulled out of the pool when its cohesion cannot keep up
     METAL_G_EPS_PER_MP: 2.2, // (see metalG)
@@ -1017,6 +1022,7 @@
     this.topo = (this.topo || 0) + 1;
     this.grains = [];
     this.grabEnd();
+    this.thrown = null;
     this.tCell.fill(this.plateTemp);
     this.cellDebt.fill(0);
     this.present.fill(0);
@@ -1027,6 +1033,7 @@
   S.removeParticle = function (i) {
     const MB = P.MAXB;
     this.topo = (this.topo || 0) + 1; // (indices change: the neighbour lists must be rebuilt)
+    this.thrown = null; // (...and the list of a thrown body)
     if (this.grainOf[i] >= 0) this.crystalEject(i);
     if (this.grab) this.grabRenumber(i, this.n - 1);
     this._removing = true;
@@ -3854,6 +3861,8 @@
         this.grabForces();
       }
       this.integrate();
+      if (this.grab && this.grab.body.length) this.capHeldHeat(this.grab.body);
+      else if (this.thrown) { if (this.time < this.thrown.until) this.capHeldHeat(this.thrown.body); else this.thrown = null; }
       this.solveBonds(P.SHAKE_ITERS);
       this.rampBonds();
       this.walls();
@@ -3915,16 +3924,29 @@
     g.vhx += 0.5 * ((x - g.hx) / dtw - g.vhx); g.vhy += 0.5 * ((y - g.hy) / dtw - g.vhy);
     g.hx = x; g.hy = y; g.t = this.time;
   };
-  S.grabEnd = function () { this.grab = null; this.held.fill(0); this.carried.fill(0); };
+  S.grabEnd = function () {
+    // (a solid let go of is still the hand's doing for a while: thrown at the glass, it is kept
+    // below its melting point as it hits, as one pushed there is: see capHeldHeat)
+    if (this.grab && this.grab.body.length) this.thrown = { body: this.grab.body.slice(), until: this.time + P.THROWN_TIME };
+    this.grab = null; this.held.fill(0); this.carried.fill(0);
+  };
   // The solid body the held patch belongs to: solid atoms bonded to it or within reach of its
   // attraction (graphite sheets resting on one another), and so on outward.
   // (A liquid is not carried: it hangs from the hand by its own cohesion, and drips.)
   S.updateCarried = function () {
     const n = this.n, carried = this.carried, el = this.el, x = this.x, y = this.y, self = this;
     const before = this.grabBody();
+    // (what the hand already carries stays part of the body while it is still attached: a lump
+    // warming where it is pushed against the glass has atoms that read past the melting point for
+    // a moment; dropped from the body, they were no longer kept from overheating, and the hand
+    // dragged an ever-hotter patch of melt into the glass. A part that has really melted, its
+    // surroundings past the melting point, does leave it)
+    const prev = this._prevCarried && this._prevCarried.length >= n ? this._prevCarried : (this._prevCarried = new Uint8Array(this.x.length));
+    prev.set(carried.subarray(0, n));
+    const solid = function (j) { return self.isSolidAtom(j) || (prev[j] === 1 && self.tCell[self.cellOfT[j]] < self.meltRef(j)); };
     carried.fill(0, 0, n);
     const queue = [], body = [];
-    for (const i of this.grab.atoms) if (this.isSolidAtom(i)) { carried[i] = 1; queue.push(i); }
+    for (const i of this.grab.atoms) if (solid(i)) { carried[i] = 1; queue.push(i); }
     while (queue.length) {
       const i = queue.pop();
       body.push(i);
@@ -3933,7 +3955,7 @@
         if (!carried[j]) { carried[j] = 1; queue.push(j); }
       }
       this.query(x[i], y[i], this.cellSize, function (j, d) {
-        if (carried[j] || d > pairRc[el[i] * NZ + el[j]] || !self.isSolidAtom(j)) return;
+        if (carried[j] || d > pairRc[el[i] * NZ + el[j]] || !solid(j)) return;
         carried[j] = 1; queue.push(j);
       });
     }
@@ -3968,12 +3990,22 @@
     const w = P.GRAB_OMEGA;
     let ax = w * w * (g.hx + g.ox - b[1]) - 2 * w * (bvx - g.vhx);
     let ay = w * w * (g.hy + g.oy - b[2]) - 2 * w * (bvy - g.vhy);
-    const nvx = bvx + ax * P.DT, nvy = bvy + ay * P.DT, nv = Math.hypot(nvx, nvy);
+    let nvx = bvx + ax * P.DT, nvy = bvy + ay * P.DT;
+    const nv = Math.hypot(nvx, nvy);
     const vmax = Math.min(P.GRAB_MAX_SPEED, Math.sqrt(2 * P.GRAB_MAX_KE * P.KB * b[5] / b[0]));
-    if (nv > vmax) {
-      const f = vmax / nv;
-      ax = (nvx * f - bvx) / P.DT; ay = (nvy * f - bvy) / P.DT;
+    if (nv > vmax) { nvx *= vmax / nv; nvy *= vmax / nv; }
+    // a solid already against the glass is pressed into it, not driven on at the hand's speed:
+    // rammed on, a soft metal was squeezed out along the glass so fast that the heat outran
+    // capHeldHeat and the lump melted. (It hits at full speed, and still dents and spreads under
+    // the press.)
+    if (g.body.length) {
+      const w = this.bodyWalls(g.body, false), vp = P.GRAB_PRESS_SPEED;
+      if (w & 1 && nvx < -vp) nvx = -vp;
+      if (w & 2 && nvx > vp) nvx = vp;
+      if (w & 4 && nvy < -vp) nvy = -vp;
+      if (w & 8 && nvy > vp) nvy = vp;
     }
+    ax = (nvx - bvx) / P.DT; ay = (nvy - bvy) / P.DT;
     const a = Math.hypot(ax, ay);
     if (a > P.GRAB_MAX_ACCEL) { ax *= P.GRAB_MAX_ACCEL / a; ay *= P.GRAB_MAX_ACCEL / a; }
     const set = g.body.length ? g.body : A;
@@ -3983,6 +4015,83 @@
       const m = mass[el[i]];
       this.fx[i] += m * ax; this.fy[i] += m * ay;
     }
+  };
+  // A solid the hand drives into the glass is stopped dead against it, and all its motion turns to
+  // heat at once: at the hand's top speed that is ~1700 K for iron, which melted it (on this scale
+  // the hand moves things ~1e13 times harder than a real one). A real lump pushed into a wall
+  // warms and deforms but does not melt; so while the hand holds a solid that touches the glass
+  // (or for THROWN_TIME after it lets go of one, so that one thrown there is kept the same way),
+  // each part of it (coarse cell) is kept to at most GRAB_HEAT_CAP of its melting point, or of the
+  // hot plate's temperature if that is higher, by damping its atoms' random motion (relative to
+  // the part's own motion) back down; the heat taken out goes into the hand and the glass.
+  // which glass the body touches: 1 left, 2 right, 4 top, 8 floor; near: within reach of the
+  // glass's attraction, else pressed against it
+  S.bodyWalls = function (body, near) {
+    const n = this.n, el = this.el, x = this.x, y = this.y, W = P.W, H = P.H;
+    let w = 0;
+    for (const i of body) {
+      if (i >= n) continue;
+      const r = near ? radius[el[i]] + P.WALL_ADH_RANGE : radius[el[i]] * 0.6;
+      if (x[i] < r) w |= 1; else if (x[i] > W - r) w |= 2;
+      if (y[i] < r) w |= 4; else if (y[i] > H - r) w |= 8;
+    }
+    return w;
+  };
+  S.capHeldHeat = function (body) {
+    const n = this.n, el = this.el, x = this.x, y = this.y, px = this.px, py = this.py;
+    if (!this.bodyWalls(body, true)) return;
+    const TC = P.TCELL, tgw = this.tgw, cells = this._capCells || (this._capCells = new Map());
+    cells.clear();
+    const cellOf = function (i) {
+      const cx = Math.min(tgw - 1, Math.max(0, Math.floor(x[i] / TC))), cy = Math.max(0, Math.floor(y[i] / TC));
+      return cy * tgw + cx;
+    };
+    // per cell: mass, momentum, count, and the melting point of what is there (and the body's
+    // own, for cells it barely reaches into, too few atoms to have a motion of their own)
+    let BM = 0, Bx = 0, By = 0;
+    for (const i of body) {
+      if (i >= n) continue;
+      const m = mass[el[i]];
+      BM += m; Bx += m * (x[i] - px[i]); By += m * (y[i] - py[i]);
+    }
+    for (const i of body) {
+      if (i >= n) continue;
+      const c = cellOf(i);
+      let a = cells.get(c);
+      if (!a) { a = [0, 0, 0, 0, 0, 0, 0]; cells.set(c, a); }
+      const m = mass[el[i]];
+      a[0] += m; a[1] += m * (x[i] - px[i]); a[2] += m * (y[i] - py[i]); a[3]++; a[6]++;
+      a[4] += this.meltRef(i);
+    }
+    for (const a of cells.values()) if (a[3] < 4) { a[0] = BM; a[1] = Bx; a[2] = By; a[3] += 1; }
+    for (const i of body) {
+      if (i >= n) continue;
+      const a = cells.get(cellOf(i));
+      const ux = x[i] - px[i] - a[1] / a[0], uy = y[i] - py[i] - a[2] / a[0];
+      a[5] += 0.5 * mass[el[i]] * (ux * ux + uy * uy);
+    }
+    const dt2 = P.DT * P.DT;
+    for (const a of cells.values()) {
+      // (the part's own motion takes one atom's share of the motion; a sparse cell measured
+      // against the body's motion was given one more above)
+      const T = a[5] / dt2 / (P.KB * (a[3] - 1));
+      const cap = Math.max(P.GRAB_HEAT_CAP * a[4] / a[6], this.plateTemp, P.AMBIENT);
+      a[5] = T > cap ? Math.sqrt(cap / T) : -1;
+    }
+    for (const i of body) {
+      if (i >= n) continue;
+      const a = cells.get(cellOf(i));
+      if (a[5] < 0) continue;
+      const vx = a[1] / a[0], vy = a[2] / a[0];
+      px[i] = x[i] - (vx + (x[i] - px[i] - vx) * a[5]);
+      py[i] = y[i] - (vy + (y[i] - py[i] - vy) * a[5]);
+    }
+  };
+  // melting point (K) of what atom i belongs to: its molecule's (from the phase data), a free metal
+  // atom's element's, or an element's for a covalent network; a guess for salts and oxides
+  S.meltRef = function (i) {
+    const z = this.el[i];
+    return this.meltT[i] || (isMetal[z] && !this.nb[i] ? meltK[z] : this.ion[i] ? P.SALT_MELT_GUESS : E[z].mp || P.SALT_MELT_GUESS);
   };
   // mass, centre and velocity (per substep) of what the hand steers: the body, or the patch
   S.grabBody = function () {

@@ -83,7 +83,7 @@ below as soon as it is found, even if it is not fixed.
 | 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
 | 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | Open |
 | 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
-| 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point) as it hits, falling back over a couple of seconds. Thrown, it bounces off and keeps most of its motion (~500 K); held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once. The scale limit of the hand (see README), not the glass or the gas | Open (found while checking gas against the glass) |
+| 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point; cell readings up to 2900 K) as it hits; lead to ~1150 K. Thrown, it bounces off and keeps most of its motion; held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once | **Fixed**: while the hand holds a solid that touches the glass (or for 4 s after throwing one), each part of it is kept to at most 80% of its melting point, the rest of the heat going into the hand and the glass; once against the glass the hand presses it on at no more than 30 units/s instead of ramming on. Iron now peaks around 900 K, lead 460 K, gold 470 K, and they still heat and dent on impact. See "Pushing a solid into the glass" |
 
 ### Root causes found during the fix pass
 
@@ -474,6 +474,36 @@ density in a layer on the wall). Gas collisions also slow a thrown lump a lot (f
 in a second, stopped within ~500 units): a few-nanometre particle in a gas is in the free-molecule
 regime, where that is right. What did turn up: a lump held and rammed into the glass gets very hot
 (issue 44).
+
+### Pushing a solid into the glass
+
+Asked for: a solid pushed into the glass should heat up and reshape, as it would, but never melt.
+At the hand's top speed a lump carries ~1700 K worth of motion per atom (for iron), and stopped dead
+against the glass all of it became heat: iron reached 2900 K in places, lead 1150 K.
+
+- **Cap.** While the hand holds a solid that is within reach of the glass, and for 4 s after it lets
+  go of one (thrown), each coarse cell of the body is kept to at most 80% of its melting point (or
+  the hot plate's temperature, if higher), by scaling its atoms' motion relative to that part's
+  own motion back down. Melting points come from the phase data for molecules, the element for
+  free metal atoms and networks, and 1000 K for salts and oxides with no data.
+- **Sticky body.** As lead warmed, single atoms read past 601 K for a moment, stopped counting as
+  solid and dropped out of the carried body, and with it out of the cap; the hand then dragged
+  an ever-hotter patch of melt into the glass (4200 K). Atoms already carried now stay in the
+  body unless their surroundings really are past the melting point. Cells the body barely
+  reaches into (fewer than 4 atoms) are measured against the body's own motion instead of being
+  skipped.
+- **Press, not ram.** Once against the glass, the hand kept driving the lump on at full speed, so
+  soft lead was squeezed out along the glass so fast that the heat each step outran the cap. A
+  body in contact with the glass is now pushed on no faster than 30 units/s; it still hits at
+  full speed and dents under the press.
+
+| Pushed into the glass at full speed | Before | After | Melts at |
+| --- | --- | --- | --- |
+| Iron | 2910 K | ~920 K | 1811 K |
+| Lead | 1153 K | ~460 K | 601 K |
+| Gold | 1519 K | ~470 K | 1337 K |
+
+(hottest coarse-cell reading of the lump)
 
 ### Every element dropped
 

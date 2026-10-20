@@ -313,7 +313,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   crumble). The hand gives each atom at most the motion energy of an iron atom at its top speed,
   so a lump of heavier atoms is thrown slower, as an arm throws a heavier ball: tungsten, lead
   and gold leave the hand at about 155–165 units/s instead of 300, and land whole where iron
-  dents slightly. Metal hardness otherwise follows the melting point only. Silicon, almost fully rigid in 2D, reads too cold.
+  dents slightly. Metal hardness otherwise follows the melting point only. A solid the hand
+  drives into the glass (or throws at it) heats up and dents but is kept to at most 80% of its
+  melting point (the rest of the heat goes into the hand and the glass), and once against the
+  glass the hand presses it on slowly instead of ramming on. Silicon, almost fully rigid in 2D, reads too cold.
 - Mixtures (**Fill jar**) start evenly mixed but not dissolved: salt goes in as NaCl pairs among
   the water molecules (there are no ions in solution, see above), and parts that react with each
   other start reacting at once. Elements that form covalent networks (boron, carbon, silicon,
