@@ -53,6 +53,7 @@ TEST_FILTER=iron npm test   # only the tests whose name contains "iron"
 | Save a molecule | Choose **Inspect**, click any molecule in the jar, then press **Save this molecule** (or `S`). It appears under **My molecules**, kept in this browser; × deletes it |
 | Add atoms or molecules | Atom view: click in the jar (1, 5, 20 or 100 per click) |
 | Add moles | Moles or Real world view: click in the jar, or type an amount and press **Add** |
+| Fill with a mixture | **Mixture**: pick components (preset molecules, your saved molecules, or elements), give each a number of parts (the ratio, in moles of formula units) and a phase (Auto: gas if it boils below the hot plate), set the amount as **% full** (how high the liquid and solid part comes up the jar; for an all-gas mix 100% = 1 atm) or as **mol in total**, and press **Fill jar**. The jar is emptied and filled with the blend already evenly mixed, at the hot plate's temperature: the liquids and solids dealt out at random onto one packed bed on the floor, the gases scattered through the room above, so a dilute solution starts dilute everywhere instead of as a drop that takes minutes to spread. The mixture is kept in this browser |
 | Spark | Spark tool, then click: a 4000 K burst of heat over a small spot, held for a moment of simulated time (the same on a fast or slow computer), like an igniter. It only heats: any bonds that break, break from that heat. Use it to light fuels such as H₂ + O₂ or CH₄ + O₂ |
 | Chill | Chill tool, then click: blasts a small spot down to 80 K, to freeze or condense what is there |
 | Inspect | Hover any atom; with the Inspect tool, click to pin a molecule |
@@ -300,6 +301,14 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   so a lump of heavier atoms is thrown slower, as an arm throws a heavier ball: tungsten, lead
   and gold leave the hand at about 155–165 units/s instead of 300, and land whole where iron
   dents slightly. Metal hardness otherwise follows the melting point only. Silicon, almost fully rigid in 2D, reads too cold.
+- Mixtures (**Fill jar**) start evenly mixed but not dissolved: salt goes in as NaCl pairs among
+  the water molecules (there are no ions in solution, see above), and parts that react with each
+  other start reacting at once. Elements that form covalent networks (boron, carbon, silicon,
+  phosphorus, sulfur and their heavier kin) cannot be part of a mixture, because they are only
+  laid down as bonded sheets; diatomic elements always go in as X₂. Liquids and solids take up
+  far more of the jar than their real volume next to the gas scale: the full jar holds about
+  10 mol of water, where a real 24 L jar would hold 1300 mol. Asked by amount for more than fits,
+  the bed stops 85% of the way up (to leave the gases room) and the toast says what went in.
 - Integration: a substep of 1 ms is short enough to follow a metal lattice's vibrations, so a
   lump left alone in an insulated jar keeps its temperature to a couple of kelvin per second.
 - Hydrogen uses a heavier dynamical mass (3 u) to keep the integrator stable; all chemistry

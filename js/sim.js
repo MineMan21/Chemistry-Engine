@@ -582,6 +582,8 @@
     return Math.min(4, e.normalValence);
   }
 
+  S.networkKind = networkKind;
+
   S.addNetwork = function (z, count, cx, cy, T, tag, kind, free1, occupy) {
     const p = z * NZ + z, L1 = C.pairLength[p * 4 + 1], r = radius[z];
     const graphite = kind === 3 && C.pairMaxOrder[p] >= 2;
@@ -794,6 +796,163 @@
       }
     }
     return added;
+  };
+
+  // One formula unit of element z as a template: a single atom, or X2 for the diatomic elements
+  // (when `natural` asks for their natural form).
+  S.elementTemplate = function (z, natural) {
+    if (natural === false || !CE.DIATOMIC.has(z)) return { atoms: [[z, 0, 0]], bonds: [] };
+    const p = z * NZ + z, L = C.pairLength[p * 4 + C.pairMaxOrder[p]] || 8;
+    return { atoms: [[z, -L / 2, 0], [z, L / 2, 0]], bonds: [[0, 1, C.pairMaxOrder[p]]] };
+  };
+
+  // Fills the jar with a mixture as if it had been stirred for a long time: parts is a list of
+  // { tpl, count, gas } (a molecule template and how many units of it). The liquid and solid parts
+  // are dealt out in random order onto one packed bed at the bottom of the jar, so every part is
+  // spread evenly through it (a dilute solution starts dilute everywhere instead of as a drop that
+  // takes minutes to diffuse); the gases are scattered at random through the room above. Each part
+  // is its own batch, so parts that react with each other do so at once, as they would on mixing.
+  // With opts.fill (0..1) the counts only give the ratio and the bed fills that share of the jar.
+  // Returns the number of units placed for each part.
+  S.fillMixture = function (parts, T, opts) {
+    T = T || this.plateTemp || P.AMBIENT;
+    const self = this, rng = this.rng;
+    const tpls = parts.map(function (p) { return relaxedTemplate(p.tpl); });
+    const tags = parts.map(function () { return ++self.batch; });
+    const placed = parts.map(function () { return 0; });
+    // occupancy hash of atoms: position, radius and hydrogen-bond role (1 = donor H, 2 = N/O/F),
+    // as an H-bonded pair touches closer than its radii (water would otherwise start a third too
+    // thin and slump as it settles)
+    const cell = 40, occ = new Map();
+    const occupy = function (x, y, r, hb) {
+      const k = Math.floor(x / cell) * 100003 + Math.floor(y / cell);
+      let a = occ.get(k); if (!a) { a = []; occ.set(k, a); } a.push(x, y, r, hb);
+    };
+    let gap = 1;
+    const fits = function (x, y, r, hb) {
+      if (x < r || x > P.W - r || y < r || y > P.H - r) return false;
+      const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        const arr = occ.get((cx + a) * 100003 + cy + b);
+        if (!arr) continue;
+        for (let m = 0; m < arr.length; m += 4) {
+          const h = hb | arr[m + 3], f = h === 3 ? P.HB_CONTACT : hb === 1 && arr[m + 3] === 1 ? P.HH_CONTACT : 1;
+          const dx = arr[m] - x, dy = arr[m + 1] - y, dmin = gap * f * (r + arr[m + 2]);
+          if (dx * dx + dy * dy < dmin * dmin) return false;
+        }
+      }
+      return true;
+    };
+    const role = function (z, donor) { return donor ? 1 : HB_ACCEPTOR[z] ? 2 : 0; };
+    for (let i = 0; i < this.n; i++) occupy(this.x[i], this.y[i], radius[this.el[i]], role(this.el[i], this.hbd[i]));
+    // (per template atom: its role)
+    const roles = tpls.map(function (tpl) {
+      return tpl.atoms.map(function (a, m) {
+        const donor = a[0] === 1 && tpl.bonds.some(function (b) { return (b[0] === m && HB_ACCEPTOR[tpl.atoms[b[1]][0]]) || (b[1] === m && HB_ACCEPTOR[tpl.atoms[b[0]][0]]); });
+        return role(a[0], donor);
+      });
+    });
+    let full = false;
+    // tries one unit of part k at (x, y) in a few random turns; adds it and returns true if it fits
+    const tryPlace = function (k, x, y) {
+      const tpl = tpls[k], rl = roles[k];
+      let ca = 1, sa = 0, ok = false;
+      for (let t = 0; t < 6 && !ok; t++) {
+        const ang = rng() * Math.PI * 2;
+        ca = Math.cos(ang); sa = Math.sin(ang);
+        ok = tpl.atoms.every(function (a, m) { return fits(x + a[1] * ca - a[2] * sa, y + a[1] * sa + a[2] * ca, radius[a[0]], rl[m]); });
+        if (tpl.atoms.length === 1) break; // (turning a single atom changes nothing)
+      }
+      if (!ok) return false;
+      const ids = [];
+      for (let m = 0; m < tpl.atoms.length; m++) {
+        const a = tpl.atoms[m], ax = x + a[1] * ca - a[2] * sa, ay = y + a[1] * sa + a[2] * ca;
+        const id = self.addAtom(a[0], ax, ay, T, tags[k]);
+        if (id < 0) { for (let q = ids.length - 1; q >= 0; q--) self.removeParticle(ids[q]); full = true; return false; }
+        occupy(ax, ay, radius[a[0]], rl[m]);
+        ids.push(id);
+      }
+      for (let m = 0; m < tpl.bonds.length; m++) {
+        const b = tpl.bonds[m];
+        self.addBond(ids[b[0]], ids[b[1]], b[2], C.pairClass[tpl.atoms[b[0]][0] * NZ + tpl.atoms[b[1]][0]]);
+      }
+      placed[k]++;
+      return true;
+    };
+    const shuffle = function (q) {
+      for (let m = q.length - 1; m > 0; m--) { const s = Math.floor(rng() * (m + 1)), t = q[m]; q[m] = q[s]; q[s] = t; }
+      return q;
+    };
+    const cond = [], gases = [];
+    parts.forEach(function (p, k) { if (p.count > 0) (p.gas ? gases : cond).push(k); });
+    let wCond = 0, atomsCond = 0;
+    cond.forEach(function (k) { wCond += parts[k].count; atomsCond += parts[k].count * tpls[k].atoms.length; });
+    // opts.fill: the counts are only the ratio, and the liquid/solid bed is built up until it fills
+    // that fraction of the jar's height (the gases then come in the same ratio to what went in)
+    const fill = opts && opts.fill > 0 && cond.length ? Math.min(1, opts.fill) : 0;
+    let bedMax = Infinity;
+    if (fill) {
+      // (room kept for the gases, so the jar's particle limit does not cut them short)
+      let atomsGas = 0;
+      gases.forEach(function (k) { atomsGas += parts[k].count * tpls[k].atoms.length; });
+      bedMax = Math.floor((0.99 * P.MAX - this.n) / ((atomsCond + atomsGas) / wCond));
+    }
+    // the bed's units in random order: all of them, or (to a fill level) dealt out in blocks that
+    // each hold the parts in their ratio
+    let queue = [];
+    const acc = cond.map(function () { return 0; });
+    const nextBlock = function () {
+      queue = [];
+      cond.forEach(function (k, c) {
+        acc[c] += parts[k].count * 64 / wCond;
+        const take = Math.floor(acc[c]);
+        acc[c] -= take;
+        for (let m = 0; m < take; m++) queue.push(k);
+      });
+      shuffle(queue);
+    };
+    if (!fill) { cond.forEach(function (k) { for (let c = 0; c < parts[k].count; c++) queue.push(k); }); shuffle(queue); }
+    // Liquids and solids: a bed built up row by row from the floor, each site taking the next unit
+    // of the shuffled queue if it fits there (atoms a full contact apart, so the bed starts
+    // neither squeezed nor full of holes); a unit that does not fit waits for the next site.
+    let top = P.H, bedN = 0;
+    if (cond.length) {
+      let rmin = Infinity;
+      cond.forEach(function (k) { tpls[k].atoms.forEach(function (a) { rmin = Math.min(rmin, radius[a[0]]); }); });
+      const step = Math.max(2, 0.45 * rmin), margin = 4;
+      // (by amount, a bed too big for the jar stops short of the top, leaving the gases some room)
+      const yStop = fill ? P.H * (1 - fill) : gases.length ? 0.15 * P.H : margin;
+      let q = 0;
+      const more = function () {
+        if (q < queue.length) return true;
+        if (!fill || bedN >= bedMax) return false;
+        nextBlock(); q = 0;
+        return queue.length > 0;
+      };
+      for (let y = P.H - margin - rmin; y > yStop && more() && !full; y -= step * 0.866) {
+        const off = (Math.round((P.H - y) / (step * 0.866)) & 1) * step * 0.5;
+        for (let x = margin + rmin + off; x < P.W - margin && bedN < bedMax && more() && !full; x += step) {
+          if (tryPlace(queue[q], x + (rng() - 0.5) * step * 0.3, y)) { q++; bedN++; top = Math.min(top, y); }
+        }
+      }
+    }
+    // Gases: random spots in the room above the bed, keeping well clear of everything
+    const gasQ = [];
+    gases.forEach(function (k) {
+      const n = fill ? Math.round(parts[k].count * bedN / wCond) : parts[k].count;
+      for (let c = 0; c < n; c++) gasQ.push(k);
+    });
+    shuffle(gasQ);
+    gap = 1.1;
+    const room = Math.max(0, top - 60);
+    for (let q = 0; q < gasQ.length && !full; q++) {
+      for (let t = 0; t < 30; t++) {
+        // (once the bed leaves no room, anywhere in the jar that is free)
+        const y = room > 200 ? 20 + rng() * (room - 20) : 20 + rng() * (P.H - 40);
+        if (tryPlace(gasQ[q], 20 + rng() * (P.W - 40), y)) break;
+      }
+    }
+    return placed;
   };
 
   // Copies the molecule containing atom i as a template for addMolecules (positions relative to

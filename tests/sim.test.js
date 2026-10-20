@@ -891,6 +891,34 @@ test('a hydrogen flame gives off light, violet-blue', function () {
   assert.ok(b > r && b > g, 'violet-blue: ' + [r, g, b].map(function (v) { return Math.round(v / (r + g + b) * 100); }).join('/'));
 });
 
+test('a mixture fills the jar evenly, in the ratio and to the height asked', function () {
+  const H2O = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+  const NaCl = { atoms: [[11, 0, 0], [17, 29.6, 0]], bonds: [[0, 1, 1]] };
+  let sim = newSim(3);
+  // by amount: exactly the counts asked
+  let placed = sim.fillMixture([{ tpl: H2O, count: 300 }, { tpl: sim.elementTemplate(Z('Ar')), count: 40, gas: true }], 293);
+  assert.deepStrictEqual(placed, [300, 40]);
+  // to a fill level: 9 parts water to 1 of salt, up to 12% of the jar, nitrogen 1 part in 10 of the bed
+  sim = newSim(4);
+  placed = sim.fillMixture([{ tpl: H2O, count: 9 }, { tpl: NaCl, count: 1 }, { tpl: sim.elementTemplate(Z('N')), count: 1, gas: true }], 293, { fill: 0.12 });
+  const ratio = placed[0] / placed[1];
+  assert.ok(ratio > 8.5 && ratio < 9.5, 'water:salt ' + ratio.toFixed(2));
+  assert.ok(Math.abs(placed[2] - (placed[0] + placed[1]) / 10) <= 1, 'nitrogen ' + placed[2]);
+  let top = P.H;
+  for (let i = 0; i < sim.n; i++) if (sim.el[i] !== Z('N')) top = Math.min(top, sim.y[i]);
+  const level = (P.H - top) / P.H;
+  assert.ok(level > 0.1 && level < 0.135, 'bed up to ' + level.toFixed(3) + ' of the jar');
+  // the salt is spread through the whole bed (top and bottom halves, left and right halves)
+  const mid = (P.H + top) / 2;
+  let low = 0, left = 0, na = 0;
+  for (let i = 0; i < sim.n; i++) if (sim.el[i] === Z('Na')) { na++; if (sim.y[i] > mid) low++; if (sim.x[i] < P.W / 2) left++; }
+  assert.ok(low / na > 0.35 && low / na < 0.65, 'salt in the lower half ' + (low / na).toFixed(2));
+  assert.ok(left / na > 0.35 && left / na < 0.65, 'salt in the left half ' + (left / na).toFixed(2));
+  // and it starts at the plate temperature, without a flash of heat as it settles
+  run(sim, 0.5);
+  assert.ok(sim.temperature < 330, 'jar at ' + sim.temperature.toFixed(0) + ' K');
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

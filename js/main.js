@@ -52,6 +52,7 @@
   function renderMoleculeLists() {
     const sel = state.mol ? state.mol.id : null;
     CE.UI.renderMoleculeChips($('mol-presets'), CE.molecules.PRESETS, sel, selectMolecule, null);
+    if (state.mixRender) state.mixRender(); // (My molecules are offered in the mixture too)
     CE.UI.renderMoleculeChips($('mol-saved'), saved, sel, selectMolecule, function (m) {
       saved = saved.filter(function (o) { return o.id !== m.id; });
       CE.molecules.storeSaved(saved);
@@ -123,6 +124,7 @@
     sim.plateTemp = Math.max(TMIN, Math.min(TMAX, T));
     $('plate').value = tToSlider(sim.plateTemp);
     $('plate-out').textContent = Math.round(sim.plateTemp) + ' K (' + Math.round(sim.plateTemp - 273.15) + ' °C)';
+    if (state.mixSummary) state.mixSummary(); // (which parts count as gas depends on the plate)
   }
   $('plate').addEventListener('input', function (e) { program = null; setPlate(sliderToT(+e.target.value)); });
   document.querySelectorAll('#plate-presets button').forEach(function (b) {
@@ -325,6 +327,156 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 5000);
   }
+
+  // ------------------------------------------------------------------ mixture
+  // Rows of [component, parts, phase]: the jar is filled with all of them evenly mixed, in the
+  // ratio of their parts (moles of formula units). Kept in this browser between visits.
+  const MIX_KEY = 'chemistry-engine.mixture';
+  let mix = [{ id: 'm:h2o', parts: 95, phase: 'auto' }, { id: 'm:nacl', parts: 5, phase: 'auto' }];
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(MIX_KEY) || 'null');
+    if (raw && Array.isArray(raw.rows) && raw.rows.length) {
+      mix = raw.rows;
+      if (raw.unit === 'mol' || raw.unit === 'fill') $('mix-unit').value = raw.unit;
+      if (raw.total > 0) $('mix-total').value = raw.total;
+    }
+  } catch (e) { /* storage blocked: start from the default */ }
+  function storeMix() {
+    try { window.localStorage.setItem(MIX_KEY, JSON.stringify({ rows: mix, total: +$('mix-total').value, unit: $('mix-unit').value })); } catch (e) { /* not kept */ }
+  }
+  // (covalent network formers are laid down as bonded sheets, so they cannot be dealt out as
+  // loose atoms through a mixture; the diatomic elements always come as X2 here)
+  const mixable = function (z) { return CE.DIATOMIC.has(z) || !sim.networkKind(z); };
+  const MIX_ELEMENTS = [];
+  for (let z = 1; z <= 118; z++) if (mixable(z)) MIX_ELEMENTS.push(z);
+  function mixComponent(id) {
+    const kind = id.slice(0, 2), key = id.slice(2);
+    if (kind === 'e:') {
+      const z = +key;
+      if (!E[z] || !mixable(z)) return null;
+      return { label: E[z].symbol + (CE.DIATOMIC.has(z) ? '₂' : ''), tpl: sim.elementTemplate(z, true),
+        gasAt: function (T) { return E[z].bp !== null && E[z].bp < T; } };
+    }
+    const m = (kind === 's:' ? saved : CE.molecules.PRESETS).find(function (o) { return o.id === key; });
+    if (!m) return null;
+    const d = CE.phase.forKey(moleculeKey(m.atoms)), boil = d && (d.Tb || d.Ts);
+    return { label: m.formula, tpl: m, gasAt: function (T) { return boil ? boil < T : !!m.gas; } };
+  }
+  function mixOptions(sel, value) {
+    sel.textContent = '';
+    const group = function (label, items) {
+      if (!items.length) return;
+      const g = document.createElement('optgroup');
+      g.label = label;
+      items.forEach(function (it) { const o = document.createElement('option'); o.value = it[0]; o.textContent = it[1]; g.appendChild(o); });
+      sel.appendChild(g);
+    };
+    group('Molecules', CE.molecules.PRESETS.map(function (m) { return ['m:' + m.id, m.formula + ' ' + m.name]; }));
+    group('My molecules', saved.map(function (m) { return ['s:' + m.id, m.formula + (m.name !== m.formula ? ' ' + m.name : '')]; }));
+    group('Elements', MIX_ELEMENTS.map(function (z) { return ['e:' + z, E[z].symbol + ' ' + E[z].name]; }));
+    sel.value = value;
+    if (sel.value !== value) sel.value = 'm:h2o';
+  }
+  function renderMix() {
+    const box = $('mix-rows');
+    box.textContent = '';
+    mix.forEach(function (row, k) {
+      const div = document.createElement('div');
+      div.className = 'mix-row';
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', 'Component ' + (k + 1));
+      mixOptions(sel, row.id);
+      row.id = sel.value;
+      sel.addEventListener('change', function () { row.id = sel.value; mixChanged(); });
+      const parts = document.createElement('input');
+      parts.type = 'number'; parts.min = '0'; parts.step = 'any'; parts.value = row.parts;
+      parts.setAttribute('aria-label', 'Parts of component ' + (k + 1));
+      parts.addEventListener('input', function () { row.parts = Math.max(0, +parts.value || 0); mixChanged(); });
+      const ph = document.createElement('select');
+      ph.setAttribute('aria-label', 'Phase of component ' + (k + 1));
+      [['auto', 'Auto'], ['cond', 'Liquid/solid'], ['gas', 'Gas']].forEach(function (o) {
+        const opt = document.createElement('option'); opt.value = o[0]; opt.textContent = o[1]; ph.appendChild(opt);
+      });
+      ph.value = row.phase || 'auto';
+      ph.title = 'Auto: gas if it boils below the hot plate temperature';
+      ph.addEventListener('change', function () { row.phase = ph.value; mixChanged(); });
+      const del = document.createElement('button');
+      del.className = 'del'; del.textContent = '×'; del.title = 'Remove'; del.setAttribute('aria-label', 'Remove component ' + (k + 1));
+      del.disabled = mix.length < 2;
+      del.addEventListener('click', function () { mix.splice(k, 1); renderMix(); mixChanged(); });
+      div.append(sel, parts, ph, del);
+      box.appendChild(div);
+    });
+    mixChanged();
+  }
+  // Works out the mixture: the share and phase (at the plate) of each component, and in moles
+  // how many formula units of each go in. By % full the bed's size is only known once it is laid
+  // down (the sim fills to that height in the ratio); an all-gas mix there is 100% = 1 atm.
+  function mixPlan() {
+    const byFill = $('mix-unit').value === 'fill';
+    const amount = Math.max(0, +$('mix-total').value || 0);
+    let sum = 0;
+    mix.forEach(function (r) { sum += r.parts > 0 ? r.parts : 0; });
+    const T = sim.plateTemp, list = [];
+    mix.forEach(function (r) {
+      const c = r.parts > 0 && sum > 0 ? mixComponent(r.id) : null;
+      if (!c) return;
+      const gas = r.phase === 'gas' || (r.phase !== 'cond' && c.gasAt(T));
+      list.push({ label: c.label, tpl: c.tpl, share: r.parts / sum, gas: gas });
+    });
+    const fill = byFill && list.some(function (c) { return !c.gas; }) ? Math.min(100, amount) / 100 : 0;
+    // (moles in total: as asked, or for an all-gas mix by % full, the share of 1 atm in the jar)
+    const total = fill ? 0 : byFill ? Math.min(100, amount) / 100 * P.JAR_VOLUME_L / (0.082057 * T) : Math.min(60, amount);
+    let atoms = 0;
+    list.forEach(function (c) {
+      c.count = fill ? c.share * 1e6 : Math.max(1, Math.round(total * c.share / P.MOL_PER_PARTICLE));
+      atoms += c.count * c.tpl.atoms.length;
+    });
+    // too many particles for the jar: everything scaled down together, keeping the ratio
+    const scale = !fill && atoms > P.MAX * 0.98 ? P.MAX * 0.98 / atoms : 1;
+    if (!fill) list.forEach(function (c) { c.count = Math.max(1, Math.floor(c.count * scale)); });
+    return { list: list, fill: fill, atoms: Math.round(atoms * scale), scaled: scale < 1 };
+  }
+  function mixChanged() { storeMix(); mixSummary(); }
+  const fmtMol = function (m) { return m === 0 ? '0' : m >= 0.1 ? m.toFixed(2) : m >= 0.01 ? m.toFixed(3) : m.toFixed(4); };
+  function mixSummary() {
+    const plan = mixPlan();
+    const s = $('mix-summary');
+    if (!plan.list.length) { s.textContent = 'Give at least one component some parts.'; return; }
+    const each = plan.list.map(function (c) {
+      return c.label + ' ' + (plan.fill ? +(c.share * 100).toPrecision(3) + '%' : fmtMol(c.count * P.MOL_PER_PARTICLE) + ' mol') + (c.gas ? ' (gas)' : '');
+    }).join(' · ');
+    s.textContent = each + (plan.fill ? ' — liquid/solid up to ' + Math.round(plan.fill * 100) + '% of the jar.' :
+      ' — ' + plan.atoms.toLocaleString() + ' atoms' + (plan.scaled ? ' (scaled down to fit the jar)' : '') + '.');
+  }
+  function fillJar() {
+    const plan = mixPlan();
+    if (!plan.list.length) { toast('Give at least one component some parts first.'); return; }
+    sim.clear();
+    program = null;
+    state.pinned = -1;
+    state.focusKey = null;
+    sim.vacuumOn = sim.canOn = false;
+    refreshPressureButtons();
+    const placed = sim.fillMixture(plan.list, sim.plateTemp, { fill: plan.fill });
+    sim.analyze();
+    refreshContents();
+    const amounts = plan.list.map(function (c, k) { return fmtMol(placed[k] * P.MOL_PER_PARTICLE) + ' mol ' + c.label; }).join(' + ');
+    const short = !plan.fill && plan.list.some(function (c, k) { return placed[k] < c.count; });
+    toast((short ? 'The jar ran out of room: ' + amounts + ' went in' : 'Filled the jar with ' + amounts) + ', evenly mixed at ' + Math.round(sim.plateTemp) + ' K.' +
+      (plan.scaled && !short ? ' Scaled down to fit the jar.' : ''));
+  }
+  $('mix-add').addEventListener('click', function () { mix.push({ id: 'm:h2o', parts: 1, phase: 'auto' }); renderMix(); });
+  $('mix-total').addEventListener('input', mixChanged);
+  $('mix-unit').addEventListener('change', function () {
+    // (a sensible amount for the new unit)
+    $('mix-total').value = $('mix-unit').value === 'fill' ? 30 : 2;
+    mixChanged();
+  });
+  $('mix-fill').addEventListener('click', fillJar);
+  state.mixRender = renderMix;
+  state.mixSummary = mixSummary;
+  renderMix();
 
   // ------------------------------------------------------------------ pointer input
   let drag = null;

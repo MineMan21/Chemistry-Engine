@@ -122,6 +122,26 @@
         <p class="hint" id="scale-note"></p>
       </section>
 
+      <section id="mix-section">
+        <h2>Mixture</h2>
+        <p class="hint">Fill the jar with an evenly mixed blend, as if it had been stirred for a long time. Parts set the ratio in moles (per formula unit). % full is how high the liquid and solid part comes up the jar; an all-gas mix fills it all, and there 100% is 1 atm.</p>
+        <div class="mix-head"><span>Component</span><span>Parts</span><span>Phase</span><span></span></div>
+        <div id="mix-rows"></div>
+        <div class="row">
+          <button id="mix-add" class="btn">+ Component</button>
+        </div>
+        <div class="row">
+          <span class="label">Amount</span>
+          <input id="mix-total" type="number" min="0.01" step="any" value="30" aria-label="Amount of the mixture">
+          <select id="mix-unit" aria-label="Amount unit">
+            <option value="fill">% full</option>
+            <option value="mol">mol in total</option>
+          </select>
+        </div>
+        <p class="hint" id="mix-summary"></p>
+        <button id="mix-fill" class="btn primary">Fill jar (replaces contents)</button>
+      </section>
+
       <section>
         <h2>Hot plate</h2>
         <div class="row">
