@@ -987,6 +987,33 @@ test('iron dissolves in dilute sulfuric acid giving off hydrogen; copper and con
   assert.ok(conc.h2 < 0.001, 'cold concentrated acid: ' + conc.h2.toFixed(3) + ' mol H2');
 });
 
+test('a lump pushed into the glass by the hand heats up but stays below its melting point', function () {
+  // stopped dead against the glass at the hand's top speed, iron used to reach ~2900 K
+  for (const z of [Z('Fe'), Z('Pb')]) {
+    const sim = newSim(1);
+    sim.addMoles(z, 0.2, P.W * 0.3, P.H * 0.5);
+    run(sim, 3);
+    const lump = [];
+    let cx = 0, cy = 0;
+    for (let i = 0; i < sim.n; i++) if (sim.el[i] === z) lump.push(i);
+    for (const i of lump) { cx += sim.x[i] / lump.length; cy += sim.y[i] / lump.length; }
+    sim.grabStart(cx, cy, 150);
+    let hx = cx, hottest = 0, x0 = Infinity;
+    for (let k = 0; k < 70; k++) {
+      hx = Math.max(-100, hx - 15); // dragged into the left wall and held there
+      sim.grabMove(hx, cy);
+      run(sim, 0.05);
+      for (const i of lump) hottest = Math.max(hottest, sim.tCell[sim.cellOfT[i]]);
+    }
+    sim.grabEnd();
+    for (const i of lump) x0 = Math.min(x0, sim.x[i]);
+    const mp = CE.elements[z].mp;
+    assert.ok(x0 < 20, CE.elements[z].symbol + ' reached the glass');
+    assert.ok(hottest < mp, CE.elements[z].symbol + ' reached ' + hottest.toFixed(0) + ' K, melts at ' + mp);
+    assert.ok(hottest > 400, CE.elements[z].symbol + ' still warms on impact: ' + hottest.toFixed(0) + ' K');
+  }
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);
