@@ -252,7 +252,10 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   dropped from the top of the jar takes 20–35 simulated seconds to land and lands whole, warming
   by 50–150 K for a moment. Weakly bound heavy metals (lead, tin) fall more gently still. Immersed
   in a liquid, a solid feels the liquid's settling force instead, so density decides whether it
-  sinks or floats: iron, gold and lead sink in water. The glass walls and floor attract
+  sinks or floats: iron, gold and lead sink in water. Packed flat, a metal comes out only about
+  twice as dense as water (iron is really 7.9 times), so an immersed metal is pulled in proportion
+  to its real density (from a table of the metals' densities): iron sinks through sulfuric acid,
+  which is 1.8 times as dense as water, while lithium and sodium stay lighter than water. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
@@ -285,7 +288,15 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   (spark) → HCl, H₂ + F₂ exploding without a spark, Na + Cl₂ → solid NaCl, metals burning to
   their oxides (MgO, Al₂O₃, iron's Fe₂O₃ and Fe₃O₄, CuO), iron in hot steam releasing hydrogen,
   iron burning in chlorine only when heated, gold untouched by hot oxygen, CO stable, hot
-  hydrogen peroxide decomposing to water and oxygen, no ammonia from N₂ + H₂ without a catalyst.
+  hydrogen peroxide decomposing to water and oxygen, no ammonia from N₂ + H₂ without a catalyst,
+  and metals above hydrogen (standard potential below zero: iron, zinc, magnesium...) dissolving in
+  dilute sulfuric acid with hydrogen bubbling off, while copper does not and cold concentrated
+  acid leaves iron alone. With no ions in the model this is one step, two of the acid's protons
+  (or one and a proton passed on by a water molecule) leaving as H₂ while the metal atom takes
+  their oxygens, and it needs water around the acid. Its heat is the real reaction's (2FE°).
+  Titanium, zirconium, niobium, molybdenum, hafnium, tantalum and tungsten (oxide films) and lead
+  (its sulfate seals it) do not dissolve. The iron sulfate does not dissolve away from the metal
+  (no ions in solution), so it gathers around the lump and slows the reaction.
   Still poorly reproduced: hydrocarbon flames stop at peroxyacids and polymers instead of going
   all the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled),
   sodium reacts with water only at its surface and slowly, and with no ions in solution there is
