@@ -255,7 +255,9 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   sinks or floats: iron, gold and lead sink in water. Packed flat, a metal comes out only about
   twice as dense as water (iron is really 7.9 times), so an immersed metal is pulled in proportion
   to its real density (from a table of the metals' densities): iron sinks through sulfuric acid,
-  which is 1.8 times as dense as water, while lithium and sodium stay lighter than water. The glass walls and floor attract
+  which is 1.8 times as dense as water, while lithium and sodium stay lighter than water. A
+  sinking metal goes no faster than 200 units/s (the liquid's drag), so a ball of iron dropped
+  into water slides in rather than slamming in and flinging the water out. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
   clinging drops. Liquid touching the glass exchanges heat with it at room temperature.

@@ -75,13 +75,14 @@ below as soon as it is found, even if it is not fixed.
 | 33 | A deep pool of liquid warms as it settles: 6 mol of water dropped as one full-width blob goes from 293 K to ~333 K in 4 s; filled as a mixture it starts at its settled density and warms less (water to 85% of the jar ~300 K, 95:5 brine to 85% ~312 K after 3 s), and its lower layers end up ~25% denser than the top, so the liquid is too compressible under the exaggerated settling gravity (a bed filling 30% of the jar stays within ~10 K) | Open (found while adding mixtures) |
 | 34 | Liquids and solids take up ~130x their real volume next to the gas scale: the 2D jar full of water holds about 10 mol (a real 24 L jar: 1300 mol), while 1 mol of gas reads 1 atm as in 24 L | Open: inherent to the 2D slice and the 1 mmol particle |
 | 35 | Covalent network elements (B, C, Si, P, S, Ge, As, Se, Sb, Te) cannot be part of a mixture: they are only laid down as bonded sheets, and as loose atoms they would bond in a frenzy | Open: they are left out of the mixture's element list |
-| 36 | Iron dropped onto sulfuric acid and water (1:3) floats on it: after 16 s its centre is still above the liquid's surface. Packed flat, iron comes out only about twice as dense as water (really 7.9 times) and the acid mixture 1.15 times, so the small difference barely pushed the iron through the thick, viscous liquid | **Fixed**: an immersed metal is pulled in proportion to its real density (new table of metal densities): iron is under the surface within 3 s and settles on the floor |
+| 36 | Iron dropped onto sulfuric acid and water (1:3) floats on it: after 16 s its centre is still above the liquid's surface. Packed flat, iron comes out only about twice as dense as water (really 7.9 times) and the acid mixture 1.15 times, so the small difference barely pushed the iron through the thick, viscous liquid | **Fixed**: an immersed metal is pulled in proportion to its real density (new table of metal densities): iron goes under and settles on the floor; it sinks no faster than SINK_VMAX (issue 43) |
 | 37 | Iron does not react with dilute sulfuric acid at room temperature (real: dissolves, giving H₂ and FeSO₄). The only route was a metal taking the acid's OH oxygen and setting the H free as an H atom, ~150 kJ/mol of activation | **Fixed**: metals with a negative standard potential dissolve in one step, two protons (one may come from a water molecule) leaving as H₂; needs water about the acid, so cold concentrated acid stays inert; copper does not react. See "Iron in dilute sulfuric acid" |
 | 38 | The iron sulfate that forms does not dissolve away into the water (ions are not solvated), so it gathers around the iron and the reaction slows: a small lump in 1:3 acid loses about 15% in 8 s, then much more slowly | Open |
 | 39 | Magnesium in dilute sulfuric acid: the reaction's heat (457 kJ/mol, the real value) speeds up magnesium's own radical reaction with water, giving Mg–H, MgO and H atoms as side products | Open |
 | 40 | Material dropped inside a liquid (a click below its surface) has no free space where it lands, so its atoms are placed wherever they fit nearby: a 0.15 mol iron lump came out as a loose cloud 1400 units wide and tall instead of a lump | Open (found while testing iron in acid) |
 | 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
 | 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | Open |
+| 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
 
 ### Root causes found during the fix pass
 
@@ -415,6 +416,9 @@ as in the real 64% acid), so the iron hung at the surface, its centre still abov
 An immersed free metal atom is now pulled in proportion to its real density over its 2D one,
 against liquids at their real density per LIQ_DENSITY (43.7, from water). Iron is pulled 3.6
 times as hard, gold 2.6, lead 1.6, lithium 1.9 and sodium 1.4, which leaves those two lighter than water, as they really are.
+Pulled that hard with nothing to slow it, a ball of iron then slammed into water (issue 43), so a
+metal in a liquid now sinks no faster than SINK_VMAX, 200 units/s, standing in for the liquid's
+drag.
 
 **Not reacting.** Real iron dissolves through protons and electrons: 2 H⁺ + 2 e⁻ → H₂ on its
 surface. The model has neither, and the only route was a metal atom taking the acid's OH oxygen
