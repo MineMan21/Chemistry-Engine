@@ -132,6 +132,8 @@
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
+    SINK_VMAX: 200, // ...and of a metal sinking through a liquid (its drag): about how fast iron sank
+    // in water before metals were pulled by their real density
     LN_COLL: 18, // ln of real collisions represented by one simulated contact-step (of DT_REF)
     LN_UNI: 16, // ln of the unimolecular attempt frequency (bond dissociation)
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
@@ -1839,7 +1841,9 @@
         }
       }
       if (noise >= 0) {
-        const vmaxB = Math.max(noise, P.BULK_VMAX) * dt;
+        // (a metal lump in a liquid sinks no faster than SINK_VMAX: the liquid's drag; pulled
+        // by its full density it would plunge in at the bulk limit and fling the liquid out)
+        const vmaxB = Math.max(noise, wet && this.nb[i] === 0 && isMetal[el[i]] ? P.SINK_VMAX : P.BULK_VMAX) * dt;
         const vb = Math.sqrt(bvx * bvx + bvy * bvy);
         if (vb > vmaxB) { const f = 1 - vmaxB / vb; vx -= bvx * f; vy -= bvy * f; bvx *= 1 - f; bvy *= 1 - f; }
       }

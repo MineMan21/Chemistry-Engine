@@ -941,8 +941,39 @@ function metalInAcid(z, water, fill, seconds, seed) {
 test('iron sinks in sulfuric acid and water (it used to float on the thick liquid)', function () {
   // packed flat, iron came out only about twice as dense as the liquid (really five times) and
   // took far too long to push the viscous acid aside
-  const r = metalInAcid(Z('Fe'), 3, 0.1, 5, 1);
-  assert.ok(r.metalY > r.surface + 50, 'iron centre ' + r.metalY.toFixed(0) + ', liquid surface ' + r.surface.toFixed(0));
+  const r = metalInAcid(Z('Fe'), 3, 0.1, 8, 1);
+  assert.ok(r.metalY > r.surface + 40, 'iron centre ' + r.metalY.toFixed(0) + ', liquid surface ' + r.surface.toFixed(0));
+});
+
+test('an iron ball dropped into water sinks in one piece, without slamming in', function () {
+  // pulled by its real density with nothing to slow it, the ball plunged in at the bulk speed
+  // limit, flung the water up the glass and heated its face until water oxidised it
+  const sim = newSim(1);
+  sim.fillMixture([{ tpl: H2O_TPL, count: 1 }], 293, { fill: 0.15 });
+  sim.addMoles(Z('Fe'), 0.4, P.W / 2, P.H * 0.62);
+  let hot = 0, oxidised = 0;
+  for (let t = 0; t < 6; t++) {
+    run(sim, 1);
+    let T = 0, nFe = 0;
+    for (let i = 0; i < sim.n; i++) if (sim.el[i] === Z('Fe')) { if (sim.nb[i]) oxidised++; else { T += sim.tLoc[i]; nFe++; } }
+    hot = Math.max(hot, T / nFe);
+  }
+  assert.strictEqual(oxidised, 0, 'iron atoms torn off and oxidised');
+  assert.ok(hot < 350, 'iron warmed to ' + hot.toFixed(0) + ' K entering the water');
+  // still one lump, and under the water
+  const fe = [];
+  for (let i = 0; i < sim.n; i++) if (sim.el[i] === Z('Fe')) fe.push(i);
+  const r = 2 * CE.elements[Z('Fe')].radius * 1.35, seen = new Set([fe[0]]), stack = [fe[0]];
+  while (stack.length) {
+    const a = stack.pop();
+    sim.query(sim.x[a], sim.y[a], r, function (j) {
+      if (sim.el[j] === Z('Fe') && !seen.has(j) && Math.hypot(sim.x[j] - sim.x[a], sim.y[j] - sim.y[a]) < r) { seen.add(j); stack.push(j); }
+    });
+  }
+  assert.ok(seen.size >= 0.98 * fe.length, 'largest piece ' + seen.size + ' of ' + fe.length);
+  let cy = 0;
+  for (const i of fe) cy += sim.y[i] / fe.length;
+  assert.ok(cy > P.H * 0.85, 'iron centre at ' + cy.toFixed(0));
 });
 
 test('iron dissolves in dilute sulfuric acid giving off hydrogen; copper and concentrated acid do not', function () {
