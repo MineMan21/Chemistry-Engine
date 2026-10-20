@@ -919,6 +919,43 @@ test('a mixture fills the jar evenly, in the ratio and to the height asked', fun
   assert.ok(sim.temperature < 330, 'jar at ' + sim.temperature.toFixed(0) + ' K');
 });
 
+const H2SO4_TPL = { atoms: [[16, 0, 0], [8, 0, -14.9], [8, 0, 14.9], [8, -17.1, 0], [1, -26.8, 0], [8, 17.1, 0], [1, 26.8, 0]], bonds: [[0, 1, 2], [0, 2, 2], [0, 3, 1], [3, 4, 1], [0, 5, 1], [5, 6, 1]] };
+const H2O_TPL = { atoms: [[8, 0, 0], [1, 9.7, 0], [1, -2.43, 9.39]], bonds: [[0, 1, 1], [0, 2, 1]] };
+// iron (or another metal) dropped onto a layer of sulfuric acid and water (1 : water)
+function metalInAcid(z, water, fill, seconds, seed) {
+  const sim = newSim(seed);
+  const parts = [{ tpl: H2SO4_TPL, count: 1 }];
+  if (water) parts.push({ tpl: H2O_TPL, count: water });
+  sim.fillMixture(parts, 293, { fill: fill });
+  sim.addMoles(z, 0.06, P.W / 2, P.H * (1 - fill) - 200);
+  run(sim, seconds);
+  let my = 0, mn = 0;
+  const ly = [];
+  for (let i = 0; i < sim.n; i++) {
+    if (sim.el[i] === z && !sim.nb[i]) { my += sim.y[i]; mn++; } else if (sim.el[i] !== z && sim.condF[i] > 0.5) ly.push(sim.y[i]);
+  }
+  ly.sort(function (a, b) { return a - b; });
+  return { sim: sim, metalY: my / mn, surface: ly[Math.floor(ly.length * 0.03)], h2: mol(sim, 'H2') };
+}
+
+test('iron sinks in sulfuric acid and water (it used to float on the thick liquid)', function () {
+  // packed flat, iron came out only about twice as dense as the liquid (really five times) and
+  // took far too long to push the viscous acid aside
+  const r = metalInAcid(Z('Fe'), 3, 0.1, 5, 1);
+  assert.ok(r.metalY > r.surface + 50, 'iron centre ' + r.metalY.toFixed(0) + ', liquid surface ' + r.surface.toFixed(0));
+});
+
+test('iron dissolves in dilute sulfuric acid giving off hydrogen; copper and concentrated acid do not', function () {
+  const fe = metalInAcid(Z('Fe'), 3, 0.06, 8, 1);
+  assert.ok(fe.h2 >= 0.004, 'H2 from iron in 1:3 acid: ' + fe.h2.toFixed(3) + ' mol');
+  const salt = fe.sim.species.some(function (s) { return /Fe/.test(s.key) && /S/.test(s.key); });
+  assert.ok(salt, 'iron sulfate formed');
+  const cu = metalInAcid(Z('Cu'), 3, 0.06, 6, 1);
+  assert.ok(cu.h2 < 0.001, 'copper is below hydrogen: ' + cu.h2.toFixed(3) + ' mol H2');
+  const conc = metalInAcid(Z('Fe'), 0, 0.06, 6, 1);
+  assert.ok(conc.h2 < 0.001, 'cold concentrated acid: ' + conc.h2.toFixed(3) + ' mol H2');
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

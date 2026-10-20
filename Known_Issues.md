@@ -70,11 +70,18 @@ below as soon as it is found, even if it is not fixed.
 | 28 | Metal hardness follows the melting point only: at the same impact speed tungsten (real hardness 5.6x iron's) dents about as much as iron. Thrown by hand, heavy metals now leave the hand slower (equal energy per atom), so tungsten lands whole where iron dents | **Improved**: see "Throwing tungsten" below |
 | 29 | Graphite on an 800 K hot plate (insulated jar) reads 900–1300 K depending on the run, mostly ~1200 K: about 1.5x hot. Its test passed only because its one random seed happened to read 936 K; it now averages three runs | Open |
 | 30 | The Moles view lags more than the other two | **Fixed**: it rebuilt and uploaded a full-screen image every frame (about 5 million pixels on a high-resolution screen); it now draws its squares directly, grouped by colour (0.7 ms a frame, was 3.1 ms at 2x pixel density, plus the upload) |
-| 31 | Sulfuric acid does not take part in acid–base or acid–metal reactions: with NH₃, NaOH or NaCl nothing happens (real: ammonium sulfate; sodium sulfate and water; HCl and NaHSO₄); iron and copper stay inert (right for cold concentrated acid), zinc does not react (real: slowly), sodium gives Na₂O and NaOH instead of Na₂SO₄ + H₂. These go through protons and ions, which the model does not have (as issues 7 and 8) | Open |
+| 31 | Sulfuric acid does not take part in acid–base or acid–metal reactions: with NH₃, NaOH or NaCl nothing happens (real: ammonium sulfate; sodium sulfate and water; HCl and NaHSO₄); copper stays inert, sodium gives Na₂O and NaOH instead of Na₂SO₄ + H₂. These go through protons and ions, which the model does not have (as issues 7 and 8) | **Improved**: metals above hydrogen now dissolve in dilute acid (issue 37); the rest open |
 | 32 | A lone fast molecule in a nearly empty patch of vapour read thousands of kelvin, enough to break its bonds and set its neighbours off | **Fixed**: sparse cells lean harder on the jar's temperature (T_PRIOR 2 → 8) |
 | 33 | A deep pool of liquid warms as it settles: 6 mol of water dropped as one full-width blob goes from 293 K to ~333 K in 4 s; filled as a mixture it starts at its settled density and warms less (water to 85% of the jar ~300 K, 95:5 brine to 85% ~312 K after 3 s), and its lower layers end up ~25% denser than the top, so the liquid is too compressible under the exaggerated settling gravity (a bed filling 30% of the jar stays within ~10 K) | Open (found while adding mixtures) |
 | 34 | Liquids and solids take up ~130x their real volume next to the gas scale: the 2D jar full of water holds about 10 mol (a real 24 L jar: 1300 mol), while 1 mol of gas reads 1 atm as in 24 L | Open: inherent to the 2D slice and the 1 mmol particle |
 | 35 | Covalent network elements (B, C, Si, P, S, Ge, As, Se, Sb, Te) cannot be part of a mixture: they are only laid down as bonded sheets, and as loose atoms they would bond in a frenzy | Open: they are left out of the mixture's element list |
+| 36 | Iron dropped onto sulfuric acid and water (1:3) floats on it: after 16 s its centre is still above the liquid's surface. Packed flat, iron comes out only about twice as dense as water (really 7.9 times) and the acid mixture 1.15 times, so the small difference barely pushed the iron through the thick, viscous liquid | **Fixed**: an immersed metal is pulled in proportion to its real density (new table of metal densities): iron is under the surface within 3 s and settles on the floor |
+| 37 | Iron does not react with dilute sulfuric acid at room temperature (real: dissolves, giving H₂ and FeSO₄). The only route was a metal taking the acid's OH oxygen and setting the H free as an H atom, ~150 kJ/mol of activation | **Fixed**: metals with a negative standard potential dissolve in one step, two protons (one may come from a water molecule) leaving as H₂; needs water about the acid, so cold concentrated acid stays inert; copper does not react. See "Iron in dilute sulfuric acid" |
+| 38 | The iron sulfate that forms does not dissolve away into the water (ions are not solvated), so it gathers around the iron and the reaction slows: a small lump in 1:3 acid loses about 15% in 8 s, then much more slowly | Open |
+| 39 | Magnesium in dilute sulfuric acid: the reaction's heat (457 kJ/mol, the real value) speeds up magnesium's own radical reaction with water, giving Mg–H, MgO and H atoms as side products | Open |
+| 40 | Material dropped inside a liquid (a click below its surface) has no free space where it lands, so its atoms are placed wherever they fit nearby: a 0.15 mol iron lump came out as a loose cloud 1400 units wide and tall instead of a lump | Open (found while testing iron in acid) |
+| 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
+| 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | Open |
 
 ### Root causes found during the fix pass
 
@@ -394,6 +401,51 @@ Causes and fixes:
 
 Hydrogen and methane flames burn as before (hydrogen: ~907 of 1000 H₂O; before: 902–919). Acid–
 base and acid–metal reactions remain missing (issue 31).
+
+### Iron in dilute sulfuric acid
+
+Found from a 1:3 sulfuric acid to water mixture with iron dropped in: the iron floated and did not
+react. Two separate causes.
+
+**Floating.** In a liquid, a solid feels the liquid's settling force, so density decides. But in
+the flat 2D packing iron comes out only about twice as dense as water (0.048 against 0.023 u per
+unit²; really 7.9 times), and the acid mixture at 0.026 left iron only ~1.8 times as dense. The
+acid mixture is also about 8–10 times as viscous as water (its molecules wander a third as far,
+as in the real 64% acid), so the iron hung at the surface, its centre still above it after 16 s.
+An immersed free metal atom is now pulled in proportion to its real density over its 2D one,
+against liquids at their real density per LIQ_DENSITY (43.7, from water). Iron is pulled 3.6
+times as hard, gold 2.6, lead 1.6, lithium 1.9 and sodium 1.4, which leaves those two lighter than water, as they really are.
+
+**Not reacting.** Real iron dissolves through protons and electrons: 2 H⁺ + 2 e⁻ → H₂ on its
+surface. The model has neither, and the only route was a metal atom taking the acid's OH oxygen
+while the H left as a free atom, which costs about 150 kJ/mol. A metal now takes two oxygens at
+once while their two protons leave as H₂ (Fe + H₂SO₄ → FeSO₄ + H₂). One proton must be the acid's
+and in the water (a water molecule next to its OH: concentrated acid keeps its protons, so cold
+concentrated acid does not attack iron, as in real steel tanks); the other may be another acid's
+or a water molecule's on the metal (then the product is Fe(OH)(HSO₄), hydrated iron sulfate).
+Only metals with a negative standard potential react, with an activation of 52 + 30·E° kJ/mol
+(iron 39, zinc 29, tin 48). Metals with oxide films (titanium, zirconium, niobium, molybdenum,
+hafnium, tantalum, tungsten) and lead (its sulfate is insoluble) do not. The heat given off is the
+real 2FE° (iron 85 kJ/mol): the model's bond energies would give 280 for iron and 398 for zinc,
+whose hot spots set off side reactions.
+
+Along the way: a metal atom that had dissolved went on to pull oxygen off the sulfate (giving SO₂
+and iron oxide), which takes hot concentrated acid; metals no longer take an oxygen off a
+hypervalent centre. Two iron atoms each taking one of the oxygens were left with spare valences
+that cross-linked the iron sulfate; the attacking atom now takes both.
+
+| 0.15 mol metal, 16 s at 293 K | Before | After |
+| --- | --- | --- |
+| Iron, 1:3 acid:water | Floats; no reaction | Sinks; 0.018 mol H₂, iron sulfates |
+| Iron, 1:10 | No reaction | 0.010 mol H₂ |
+| Zinc, 1:10 | No reaction | 0.011 mol H₂, zinc sulfates (a few ZnOH and H side products) |
+| Copper, 1:10 | No reaction | No reaction |
+| Iron, concentrated acid | No reaction | No reaction |
+
+The reaction slows as the iron sulfate builds up around the lump (issue 38): the model has no
+ions in solution, so the salt does not dissolve away. A screening of the ions' charges by the
+water around them was tried; it halved how strongly the sulfate held together but changed little,
+the products being slow to diffuse away through the viscous acid, and was left out.
 
 ### Every element dropped
 

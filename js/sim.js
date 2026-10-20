@@ -126,6 +126,9 @@
     // liquid's gravity instead (buoyancy; see integrate)
     METAL_G_MIN_DRY: 0.4, // least share of that a weakly bound metal (see metalG) feels while dry
     G_EASE: 0.01, // fraction of the way the settling force on an atom moves to its new value per substep
+    LIQ_DENSITY: 43.7, // real density (g/cm3) per unit of 2D density (u per unit^2) of a liquid
+    // as the model packs it (water: 0.0229 for 1.00 g/cm3; sulfuric acid comes out 52, 1:3 acid
+    // and water 59): sets how much a metal immersed in a liquid sinks (see metalSink)
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
@@ -134,6 +137,12 @@
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
+    ACID_EA: 52, ACID_EA_PER_V: 30, ACID_EA_MIN: 25, // activation (kJ/mol) of a metal dissolving
+    // in dilute acid, by the metal's standard potential (iron, -0.44 V: 39; zinc: 29; tin: 48)
+    ACID_O_REACH: 2.5, // the other oxygen lies within this many metal-O contacts of the metal atom (a
+    // layer of water or product between them, through which the protons pass)
+    ACID_H_REACH: 5, // the two protons that leave as H2 lie within this many H-H contacts of each other
+    ACID_SOLV: 1.6, // an acid's proton is in the water when a water oxygen lies within this many O-O contacts of its OH
     SH2_MAX: 250, // kJ/mol: a radical displaces a group at a saturated centre only across a bond weaker than this
     ALPHA_4C: 0.4, // same for concerted four-centre exchanges between two whole molecules: they are
     // symmetry forbidden, so stable substances (sulfuric acid, benzene) do not condense or
@@ -212,6 +221,9 @@
   };
 
   const HALOGENS = new Set([9, 17, 35, 53, 85]);
+  // metals with an oxide film that dilute acids do not get through (titanium, zirconium, niobium,
+  // molybdenum, hafnium, tantalum, tungsten), and lead, which its own insoluble sulfate seals
+  const ACID_PASSIVE = new Set([22, 40, 41, 42, 72, 73, 74, 82]);
 
   // Cohesive energies of metals (kJ/mol: the energy to take the solid apart into free atoms; Kittel,
   // Introduction to Solid State Physics). Other metals use 0.12 kJ/mol per K of boiling point,
@@ -228,7 +240,7 @@
   const mass = new Float32Array(NZ), invMass = new Float32Array(NZ), radius = new Float32Array(NZ);
   const en = new Float32Array(NZ), maxVal = new Uint8Array(NZ), normVal = new Uint8Array(NZ);
   const isMetal = new Uint8Array(NZ), vdwEps = new Float32Array(NZ), metalEps = new Float32Array(NZ);
-  const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ);
+  const elColor = new Uint32Array(NZ), metalA = new Float32Array(NZ), metalG = new Float32Array(NZ), metalSink = new Float32Array(NZ);
   const metalAng = new Float32Array(NZ); // strength of the directional term (energy units)
   const wallAdh = new Float32Array(NZ); // glass attraction well depth (K) per element
   const meltK = new Float32Array(NZ); // melting point (K)
@@ -264,6 +276,13 @@
     // (measured against a fixed well per K of melting point, so that how a metal's binding is
     // split between its pair well and its directional bonding does not change how hard it falls)
     metalG[z] = e.isMetal ? Math.min(1, P.METAL_G_EPS_PER_MP * (e.mp || 1000) / mass[z] / P.METAL_G_REF) : 1;
+    // ...and, immersed in a liquid, scaled so that the metal is as much denser than the liquid as
+    // it really is. Packed flat, a metal comes out only about twice as dense as water (iron: 7.9
+    // times), so a lump sank through a thick liquid (sulfuric acid) far too slowly and seemed to
+    // float on it. A liquid's 2D density (mass per area) is about its real density / LIQ_DENSITY;
+    // the metal's is its atom's mass over the area it takes up in a close-packed sheet
+    const rho2d = mass[z] / (0.866 * 4 * radius[z] * radius[z]);
+    metalSink[z] = e.isMetal && e.density ? Math.max(0.25, Math.min(5, e.density / P.LIQ_DENSITY / rho2d)) : 1;
     elColor[z] = packColor(e.color);
     meltK[z] = e.mp || 1000;
     // metals (mercury!) barely wet glass; everything else feels a fraction of its dispersion
@@ -1779,19 +1798,20 @@
       const c = contacts[i] > 4 ? 4 : contacts[i];
       // settling gravity only for material that is clearly packed (passing gas collisions give
       // a small condF that must not pile the vapour up near the floor)
-      let cs = (condF[i] - 0.5) * 3.3, gc = P.G_CONDENSED;
+      let cs = (condF[i] - 0.5) * 3.3, gc = P.G_CONDENSED, wet = 0;
       if (cs > 0) {
         let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
         tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
         tcy = tcy < 0 ? 0 : tcy >= tgh ? tgh - 1 : tcy;
         const nc = (cndN[tcy * tgw + tcx] - P.SETTLE_MIN) / P.SETTLE_RANGE;
         cs *= nc <= 0 ? 0 : nc >= 1 ? 1 : nc;
-        if (solidF[i] && !wetC[tcy * tgw + tcx]) gc = P.G_SOLID;
+        wet = wetC[tcy * tgw + tcx];
+        if (solidF[i] && !wet) gc = P.G_SOLID;
       }
       let g = gc * (cs <= 0 ? 0 : cs >= 1 ? 1 : cs);
       // (a solid falling through gas is pulled gently enough already that it is never squeezed;
       // the scaling only slows how fast a weakly bound metal lands)
-      if (this.nb[i] === 0) g *= gc === P.G_SOLID ? Math.max(metalG[el[i]], P.METAL_G_MIN_DRY) : Math.min(1, metalG[el[i]] * P.METAL_G_ABS / P.G_CONDENSED);
+      if (this.nb[i] === 0) g *= gc === P.G_SOLID ? Math.max(metalG[el[i]], P.METAL_G_MIN_DRY) : Math.min(1, metalG[el[i]] * P.METAL_G_ABS / P.G_CONDENSED) * (wet ? metalSink[el[i]] : 1);
       // the hand carries the weight of what it holds: the patch it grips and the solid body
       // hanging from it (the settling force is far stronger than real gravity on this scale;
       // its weight would tear a held lump apart, which real weight never does to a small one)
@@ -2809,11 +2829,19 @@
 
   // Records the non-bonded energy of the atoms about to react...
   S.beginEvent = function (a, b, c, d) {
-    const set = this._evSet || (this._evSet = new Int32Array(4));
+    const set = this._evSet || (this._evSet = new Int32Array(6));
     let k = 0;
     set[k++] = a; set[k++] = b;
     if (c >= 0) set[k++] = c;
     if (d >= 0 && d !== c) set[k++] = d;
+    this._evCount = k;
+    this._evU = this.eventTotalEnergy(set, k);
+  };
+  // (the same for up to six atoms)
+  S.beginEventN = function (list) {
+    const set = this._evSet || (this._evSet = new Int32Array(6));
+    let k = 0;
+    for (const a of list) if (a >= 0 && k < 6) { let dup = false; for (let m = 0; m < k; m++) if (set[m] === a) dup = true; if (!dup) set[k++] = a; }
     this._evCount = k;
     this._evU = this.eventTotalEnergy(set, k);
   };
@@ -2978,6 +3006,7 @@
         if (isMetal[el[a]] && this.condF[a] > 0.5) RT = P.R_KJ * Math.max(this.tLoc[a], 1);
         if (isMetal[el[a]]) {
           if (this.dissociativeAdsorption(a, b, RT)) continue;
+          if (this.acidDissolve(a, b, RT)) continue;
           // a metal surface does not half-open O2 or Cl2 into a peroxide or superoxide (M-O-O.) or
           // knock a lone O atom off it: diatomics split across two metal atoms (above). A lone metal
           // atom in the gas does pluck one atom off a halogen (Na + Cl2 -> NaCl + Cl, the harpoon
@@ -2998,6 +3027,10 @@
         const k = isMetal[el[a]] && this.acidicH(b) >= 0 ? this.acidicH(b) : this.weakestBond(b, a);
         if (k >= 0 && k === this._acidH) this._weakE = C.stepEnergy(el[b], 1, 1);
         if (k < 0 || el[k] === el[a]) continue; // X. + X-Y -> X-Y + X. changes nothing
+        // (nor does a metal pull an oxygen off a hypervalent centre: iron dissolving in sulfuric
+        // acid went on to strip its sulfate down to SO2 and iron oxide; reducing an oxoanion takes
+        // a hot concentrated acid and goes through protons, which the model does not have)
+        if (isMetal[el[a]] && this.used[k] > normVal[el[k]]) continue;
         if (this.nb[b] > 1 && this.bondOrder(b, k) < 2 && !isMetal[el[a]] && this._weakE >= P.SH2_MAX) continue;
         // (nor across the oxygen end of a hypervalent S=O: copper used to add to sulfuric acid)
         if (this.bondOrder(b, k) >= 2 && this.used[k] > normVal[el[k]]) continue;
@@ -3173,6 +3206,88 @@
     this.addBond(m, k, 1, C.pairClass[pMK]);
     this.endEvent(a, b);
     this.heat(a, b, -dH);
+    this.logReaction();
+    return true;
+  };
+
+  // Is the proton h of an acid in the water: a water molecule next to its OH group? An oxoacid
+  // gives up its proton to water (H2SO4 + H2O -> H3O+ + HSO4-); with no water about (cold
+  // concentrated acid) it keeps it.
+  S.solvatedH = function (h) {
+    const x = this.x, y = this.y, self = this, o = this.bp[h * P.MAXB];
+    const r = pairSigma[8 * NZ + 8] * P.ACID_SOLV;
+    let found = false;
+    this.query(x[o], y[o], r, function (j) {
+      if (found || j === o || !self.isWaterO(j)) return;
+      if ((x[j] - x[o]) ** 2 + (y[j] - y[o]) ** 2 < r * r) found = true;
+    });
+    return found;
+  };
+
+  // A metal more active than hydrogen (standard potential below zero) dissolving in dilute acid:
+  // Fe + H2SO4 -> FeSO4 + H2. Metal atom a meets an oxygen b, either an acid's OH whose proton is
+  // in the water or a water molecule on the metal; a second proton nearby (one at least of the two
+  // from the acid), and the metal takes both oxygens while the two protons leave as H2, in one
+  // step, as they are reduced on its surface. (Taken one at a time they would have to leave as
+  // free H atoms, far uphill: iron sat in dilute sulfuric acid without reacting.) The metal atom
+  // leaves the lump as Fe(HSO4)2, FeSO4 or, with a water molecule's OH, Fe(OH)(HSO4). Returns
+  // true when it happened.
+  S.acidDissolve = function (a, b, RT) {
+    const el = this.el, ea = el[a], e0 = E[ea].e0;
+    if (!(e0 < 0) || ACID_PASSIVE.has(ea) || this.nb[a] || el[b] !== 8) return false;
+    // b: an acid's OH oxygen whose proton is in the water, or a water molecule on the metal
+    let h = this.acidicH(b);
+    const bAcid = h >= 0;
+    if (bAcid ? !this.solvatedH(h) : !this.isWaterO(b)) return false;
+    const x = this.x, y = this.y, self = this, MB = P.MAXB;
+    // the other proton: on another acid OH oxygen at the metal, or (if b is an acid's) on a water
+    // molecule there; protons hop through the water, so the two need not be side by side. One of
+    // the two at least comes from the acid: water alone does not dissolve iron.
+    const reachO = pairSigma[ea * NZ + 8] * P.ACID_O_REACH, reachM = pairSigma[ea * NZ + ea] * 1.6;
+    const reachH = P.ACID_H_REACH * pairSigma[1 * NZ + 1];
+    // (a takes both oxygens if it has the valence, as iron does: Fe2+; a neighbour takes the
+    // second for a metal of valence one, sodium; two iron atoms taking one each were left with
+    // spare valences that went on to bond more sulfate, cross-linking the iron salt)
+    const surf = [];
+    if (maxVal[ea] >= 2) surf.push(a);
+    else this.query(x[a], y[a], reachM, function (j) {
+      if (j !== a && isMetal[el[j]] && !self.nb[j] && self.canAccept(j, 8) && (x[j] - x[a]) ** 2 + (y[j] - y[a]) ** 2 < reachM * reachM) surf.push(j);
+    });
+    const nearest = function (o, ref) { // o's hydrogen nearest to atom ref
+      const p0 = self.bp[o * MB], p1 = self.bp[o * MB + 1];
+      return (x[p0] - x[ref]) ** 2 + (y[p0] - y[ref]) ** 2 < (x[p1] - x[ref]) ** 2 + (y[p1] - y[ref]) ** 2 ? p0 : p1;
+    };
+    if (!bAcid) h = nearest(b, a);
+    let b2 = -1, h2 = -1, m = -1, best = reachH * reachH;
+    for (const s of surf) {
+      this.query(x[s], y[s], reachO, function (j) {
+        if (j === b || el[j] !== 8 || (x[j] - x[s]) ** 2 + (y[j] - y[s]) ** 2 > reachO * reachO) return;
+        let k = self.acidicH(j);
+        if (k >= 0 && !self.solvatedH(k)) return;
+        // (a water molecule: the metal ends up with its OH, Fe(OH)(HSO4), hydrated iron sulfate)
+        if (k < 0 && bAcid && self.isWaterO(j)) k = nearest(j, h);
+        if (k < 0 || k === h) return;
+        const d2 = (x[k] - x[h]) ** 2 + (y[k] - y[h]) ** 2;
+        if (d2 < best) { best = d2; b2 = j; h2 = k; m = s; }
+      });
+    }
+    if (b2 < 0) return false;
+    const pAO = ea * NZ + 8, pMO = el[m] * NZ + 8;
+    if (!C.pairClass[pAO] || !C.pairClass[pMO]) return false;
+    const dH = 2 * C.stepEnergy(8, 1, 1) - C.pairEnergy[pAO * 4 + 1] - C.pairEnergy[pMO * 4 + 1] - C.bondEnergy(1, 1, 1);
+    const Ea = Math.max(P.ACID_EA_MIN, P.ACID_EA + P.ACID_EA_PER_V * e0) + Math.max(0, dH);
+    if (!(this.rng() < Math.exp(Math.min(0, lnColl() - Ea / RT))) || !this.canAfford(a, b, dH)) return false;
+    this.beginEventN([a, b, h, h2, b2, m]);
+    this.setBond(b, h, 0);
+    this.setBond(b2, h2, 0);
+    this.addBond(a, b, 1, C.pairClass[pAO]);
+    this.addBond(m, b2, 1, C.pairClass[pMO]);
+    this.addBond(h, h2, 1, C.pairClass[1 * NZ + 1]);
+    this.endEvent(a, b);
+    // the heat given off is the real reaction's, 2 F E0 (iron 85 kJ/mol, zinc 147, magnesium 457):
+    // the model's bond energies, made for molecules in the gas, leave out the water around the
+    // ions and overstate it (iron's would be 280, zinc's hot enough to set off side reactions)
+    this.heat(a, b, -2 * 96.485 * e0);
     this.logReaction();
     return true;
   };

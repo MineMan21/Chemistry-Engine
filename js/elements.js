@@ -243,6 +243,38 @@
   // Elements that naturally exist as diatomic molecules.
   const DIATOMIC = new Set([1, 7, 8, 9, 17, 35, 53, 85, 117]); // (astatine and tennessine as the heavier halogens)
 
+  // Density (g/cm3) of the metals near room temperature (CRC Handbook; mercury as the liquid),
+  // used for whether a lump sinks or floats in a liquid. Elements past einsteinium have only
+  // predicted values and are left out; francium's is an estimate.
+  const DENSITY = {
+    Li: 0.534, Be: 1.85, Na: 0.968, Mg: 1.738, Al: 2.70, K: 0.862, Ca: 1.55, Sc: 2.985, Ti: 4.506,
+    V: 6.0, Cr: 7.19, Mn: 7.21, Fe: 7.874, Co: 8.90, Ni: 8.908, Cu: 8.96, Zn: 7.14, Ga: 5.91,
+    Rb: 1.532, Sr: 2.64, Y: 4.472, Zr: 6.52, Nb: 8.57, Mo: 10.28, Tc: 11.0, Ru: 12.45, Rh: 12.41,
+    Pd: 12.02, Ag: 10.49, Cd: 8.65, In: 7.31, Sn: 7.265, Cs: 1.93, Ba: 3.51, La: 6.162, Ce: 6.77,
+    Pr: 6.77, Nd: 7.01, Pm: 7.26, Sm: 7.52, Eu: 5.264, Gd: 7.90, Tb: 8.23, Dy: 8.54, Ho: 8.79,
+    Er: 9.066, Tm: 9.32, Yb: 6.90, Lu: 9.841, Hf: 13.31, Ta: 16.69, W: 19.25, Re: 21.02, Os: 22.59,
+    Ir: 22.56, Pt: 21.45, Au: 19.30, Hg: 13.534, Tl: 11.85, Pb: 11.34, Bi: 9.78, Po: 9.196, Fr: 1.87,
+    Ra: 5.5, Ac: 10.07, Th: 11.72, Pa: 15.37, U: 19.1, Np: 20.45, Pu: 19.816, Am: 12.0, Cm: 13.51,
+    Bk: 14.78, Cf: 15.1, Es: 8.84
+  };
+  for (let z = 1; z <= 118; z++) list[z].density = DENSITY[list[z].symbol] || null;
+
+  // Standard reduction potential (V) of the metal's common aqueous ion, M^n+ + n e- -> M (CRC
+  // Handbook; francium and radium estimated): below zero the metal is more active than hydrogen
+  // and dissolves in dilute acid, giving off H2
+  const E0 = {
+    Li: -3.04, Be: -1.85, Na: -2.71, Mg: -2.37, Al: -1.66, K: -2.93, Ca: -2.87, Sc: -2.08,
+    Ti: -1.63, V: -1.18, Cr: -0.91, Mn: -1.18, Fe: -0.44, Co: -0.28, Ni: -0.25, Cu: 0.34, Zn: -0.76,
+    Ga: -0.53, Rb: -2.98, Sr: -2.89, Y: -2.37, Zr: -1.45, Nb: -1.1, Mo: -0.2, Tc: 0.4, Ru: 0.46,
+    Rh: 0.76, Pd: 0.95, Ag: 0.80, Cd: -0.40, In: -0.34, Sn: -0.14, Cs: -3.03, Ba: -2.91,
+    La: -2.38, Ce: -2.34, Pr: -2.35, Nd: -2.32, Pm: -2.30, Sm: -2.30, Eu: -1.99, Gd: -2.28,
+    Tb: -2.31, Dy: -2.29, Ho: -2.33, Er: -2.31, Tm: -2.31, Yb: -2.22, Lu: -2.28, Hf: -1.55,
+    Ta: -0.6, W: -0.12, Re: 0.3, Os: 0.85, Ir: 1.16, Pt: 1.18, Au: 1.50, Hg: 0.85, Tl: -0.34,
+    Pb: -0.13, Bi: 0.31, Po: 0.37, Fr: -2.9, Ra: -2.8, Ac: -2.20, Th: -1.90, Pa: -1.47, U: -1.80,
+    Np: -1.79, Pu: -2.03, Am: -2.07, Cm: -2.06, Bk: -1.97, Cf: -1.91, Es: -1.98
+  };
+  for (let z = 1; z <= 118; z++) list[z].e0 = list[z].symbol in E0 ? E0[list[z].symbol] : null;
+
   CE.elements = list;
   CE.bySymbol = bySymbol;
   CE.DIATOMIC = DIATOMIC;
