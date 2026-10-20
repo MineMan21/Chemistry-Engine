@@ -69,6 +69,7 @@ below as soon as it is found, even if it is not fixed.
 | 27 | About a third of 0.6 mol of chlorine counts as condensed at room temperature (clinging to the iron and the glass), though Cl₂ boils at 239 K | Open |
 | 28 | Metal hardness follows the melting point only: at the same impact speed tungsten (real hardness 5.6x iron's) dents about as much as iron. Thrown by hand, heavy metals now leave the hand slower (equal energy per atom), so tungsten lands whole where iron dents | **Improved**: see "Throwing tungsten" below |
 | 29 | Graphite on an 800 K hot plate (insulated jar) reads 900–1300 K depending on the run, mostly ~1200 K: about 1.5x hot. Its test passed only because its one random seed happened to read 936 K; it now averages three runs | Open |
+| 30 | The Moles view lags more than the other two | **Fixed**: it rebuilt and uploaded a full-screen image every frame (about 5 million pixels on a high-resolution screen); it now draws its squares directly, grouped by colour (0.7 ms a frame, was 3.1 ms at 2x pixel density, plus the upload) |
 
 ### Root causes found during the fix pass
 

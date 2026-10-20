@@ -30,9 +30,8 @@
     this.highlight = null; // Set of atom indices to outline
     this.focus = null; // per-atom mask (1 = part of the species picked in Contents); others dim
     this.showCharges = true;
-    this.pixelCanvas = document.createElement('canvas');
-    this.pixelCtx = this.pixelCanvas.getContext('2d');
-    this.imageData = null;
+    this.pixelGroups = new Map(); // mole view: squares to draw, by colour
+    this.pixelCss = new Map();
     this.time = 0;
     this.sparks = [];
     this.lightCanvas = document.createElement('canvas');
@@ -273,25 +272,20 @@
   };
 
   // Zoomed out: one pixel (or small square) per atom.
+  // Mole view: each atom a small square. Drawn as rectangles grouped by colour (a handful of
+  // fill colours a frame), not as a full-screen image rebuilt and uploaded to the graphics card
+  // every frame, which on a high-resolution screen made this the laggiest view.
   R.drawPixels = function (ctx, alpha) {
     const sim = this.sim, n = sim.n;
-    const w = Math.ceil(this.width * this.dpr), h = Math.ceil(this.height * this.dpr);
-    if (this.pixelCanvas.width !== w || this.pixelCanvas.height !== h) {
-      this.pixelCanvas.width = w; this.pixelCanvas.height = h;
-      this.imageData = null;
-    }
-    if (!this.imageData) {
-      this.imageData = this.pixelCtx.createImageData(w, h);
-      this.pix32 = new Uint32Array(this.imageData.data.buffer);
-    }
-    const pix = this.pix32;
-    pix.fill(0);
+    const w = this.width * this.dpr, h = this.height * this.dpr;
     const s = this.cam.scale * this.dpr;
     const ox = this.width / 2 * this.dpr - this.cam.x * s, oy = this.height / 2 * this.dpr - this.cam.y * s;
     const colors = this.colorMode === 'element' ? null : sim.molColor;
     const elColor = CE.Simulation.elColor;
     const x = sim.x, y = sim.y, el = sim.el;
-    const hl = this.highlight, focus = this.focus;
+    const hl = this.highlight, focus = this.focus, groups = this.pixelGroups;
+    if (groups.size > 512) groups.clear();
+    groups.forEach(function (list) { list.length = 0; });
     for (let i = 0; i < n; i++) {
       const px = Math.floor(x[i] * s + ox), py = Math.floor(y[i] * s + oy);
       const size = Math.max(1, Math.round(E[el[i]].radius * 1.2 * s));
@@ -299,19 +293,25 @@
       let col = colors ? colors[i] : elColor[el[i]];
       if (focus) col = focus[i] ? 0xff00ffff : (col & 0x00ffffff) | 0x30000000; // picked: yellow, rest faint
       if (hl && hl.has(i)) col = 0xff00ffff; // yellow
-      const x0 = Math.max(0, px - (size >> 1)), y0 = Math.max(0, py - (size >> 1));
-      const x1 = Math.min(w, x0 + size), y1 = Math.min(h, y0 + size);
-      for (let yy = y0; yy < y1; yy++) {
-        const row = yy * w;
-        for (let xx = x0; xx < x1; xx++) pix[row + xx] = col;
-      }
+      let list = groups.get(col);
+      if (!list) { list = []; groups.set(col, list); }
+      list.push(px - (size >> 1), py - (size >> 1), size);
     }
-    this.pixelCtx.putImageData(this.imageData, 0, 0);
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = alpha === undefined ? 1 : alpha;
-    ctx.drawImage(this.pixelCanvas, 0, 0);
+    const css = this.pixelCss;
+    groups.forEach(function (list, col) {
+      if (!list.length) return;
+      let fill = css.get(col);
+      if (!fill) {
+        // (colours are packed as in image data: alpha, blue, green, red from the high byte down)
+        fill = 'rgba(' + (col & 255) + ',' + ((col >>> 8) & 255) + ',' + ((col >>> 16) & 255) + ',' + ((col >>> 24) / 255).toFixed(3) + ')';
+        css.set(col, fill);
+      }
+      ctx.fillStyle = fill;
+      for (let k = 0; k < list.length; k += 3) ctx.fillRect(list[k], list[k + 1], list[k + 2], list[k + 2]);
+    });
     ctx.restore();
   };
 
