@@ -45,7 +45,7 @@ below as soon as it is found, even if it is not fixed.
 | 3 | Ethanol decomposes at room temperature | **Improved**: ~95% intact after 15 s |
 | 4 | Gold oxidises | **Fixed** |
 | 5 | Iron + chlorine react at room temperature | **Fixed** |
-| 6 | Sodium and potassium barely react with water | Open |
+| 6 | Sodium and potassium barely react with water | **Fixed**: they (and lithium, calcium, barium) now give their hydroxide and H₂ (2 Na + 2 H₂O → 2 NaOH + H₂), no hydride; see issue 6 below. Barium still leaves a little BaH₂ (issue 45) |
 | 7 | NH₃ + HCl makes radicals | **Improved**: no radicals; still no NH₄Cl |
 | 8 | Neutralisation makes radicals | **Improved**: no radicals; still no reaction |
 | 9 | H₂ + F₂ does not react in the dark | **Fixed** |
@@ -79,11 +79,12 @@ below as soon as it is found, even if it is not fixed.
 | 37 | Iron does not react with dilute sulfuric acid at room temperature (real: dissolves, giving H₂ and FeSO₄). The only route was a metal taking the acid's OH oxygen and setting the H free as an H atom, ~150 kJ/mol of activation | **Fixed**: metals with a negative standard potential dissolve in one step, two protons (one may come from a water molecule) leaving as H₂; needs water about the acid, so cold concentrated acid stays inert; copper does not react. See "Iron in dilute sulfuric acid" |
 | 38 | The iron sulfate that forms does not dissolve away into the water (ions are not solvated), so it gathers around the iron and the reaction slows: a small lump in 1:3 acid loses about 15% in 8 s, then much more slowly | Open |
 | 39 | Magnesium in dilute sulfuric acid: the reaction's heat (457 kJ/mol, the real value) speeds up magnesium's own radical reaction with water, giving Mg–H, MgO and H atoms as side products | Open |
-| 40 | Material dropped inside a liquid (a click below its surface) has no free space where it lands, so its atoms are placed wherever they fit nearby: a 0.15 mol iron lump came out as a loose cloud 1400 units wide and tall instead of a lump | Open (found while testing iron in acid) |
+| 40 | Material dropped inside a liquid (a click below its surface) has no free space where it lands, so its atoms are placed wherever they fit nearby: a 0.15 mol iron lump came out as a loose cloud 1400 units wide and tall instead of a lump | **Fixed**: a solid or liquid released inside material is released just above it instead, and falls in as a lump |
 | 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
-| 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | Open |
+| 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out. Measured: 30 H₂ molecules placed at the bottom of water are still ~150 units deep after 12 s, only ~13% above the surface. The model has no hydrophobic effect: the dispersion pull of many water neighbours makes non-polar gases prefer the water, where real water's hydrogen-bond network pushes them out (H₂ barely dissolves). The same likely makes oil and water mix too readily | Open (cause found) |
 | 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
 | 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point; cell readings up to 2900 K) as it hits; lead to ~1150 K. Thrown, it bounces off and keeps most of its motion; held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once | **Fixed**: while the hand holds a solid that touches the glass (or for 4 s after throwing one), each part of it is kept to at most 80% of its melting point, the rest of the heat going into the hand and the glass; once against the glass the hand presses it on at no more than 30 units/s instead of ramming on. Iron now peaks around 900 K, lead 460 K, gold 470 K, and they still heat and dent on impact. See "Pushing a solid into the glass" |
+| 45 | Barium in water still leaves a little BaH₂ and BaH (~0.006 mol from 0.06 mol of barium in 10 s): the hot metal takes up some of the H₂ it gives off faster than water hydrolyses the hydride | Open (found while fixing issue 6) |
 
 ### Root causes found during the fix pass
 
@@ -632,10 +633,27 @@ Iron now sits unreacted in chlorine at room temperature and burns on a 700 K pla
 holds together as a solid up to its 579 K sublimation point.
 
 ### 6. Sodium and potassium barely react with water — High (README)
-**Status: Open.** Sodium still reacts slowly, mostly at its surface, and makes NaH and Na₂O
-alongside NaOH. The likely root cause is that ions in solution aren't modelled: the NaOH
-crust cannot dissolve away to expose fresh metal.
-- **Real:** both react violently, and potassium ignites the hydrogen.
+**Status: Fixed.** Sodium took water's hydrogen one atom at a time, a radical step with a high
+cost, so it reacted slowly and the H atoms it set free stuck to the metal as NaH, while sodium
+pulled the H off the NaOH it had made, leaving Na₂O. Calcium took water's H as CaH and freed OH.
+The concerted step that dissolves metals in acid (issue 37) now takes both protons from water for
+metals with a standard potential of −2.5 V or below (WATER_E0): 2 Na + 2 H₂O → 2 NaOH + H₂, with
+the heat 2F(E° + 0.41) (444 kJ per H₂ for sodium). These metals no longer take a single H off an
+O–H (from either end). A hydride of one of them next to water is hydrolysed at once
+(CaH₂ + 2 H₂O → Ca(OH)₂ + 2 H₂), and H₂ splits onto a metal only with an extra 60 kJ/mol
+(HYDRIDE_BARRIER): lithium, sodium and calcium take up hydrogen only at a few hundred degrees.
+
+| 0.06 mol in water, 10 s | Before | After |
+| --- | --- | --- |
+| Sodium | NaOH 0.005, NaH 0.005, Na₂O 0.005, H₂ 0.005, H atoms | NaOH 0.018, H₂ 0.009 |
+| Potassium | KH 0.007, K₂O 0.003, KOH 0.001 | KOH 0.016, H₂ 0.008 |
+| Lithium | LiH 0.010, Li₂O 0.006, LiOH 0.004, H₂ 0.002, H atoms | LiOH 0.020, H₂ 0.010 |
+| Calcium | Ca₂H₂O 0.008, CaH₂ 0.005, CaH₂O 0.004, H atoms, Ca(OH)₂ 0.002 | Ca(OH)₂ 0.014, H₂ 0.014, traces of CaHO/CaH₂ |
+| Magnesium, iron | no reaction | no reaction |
+
+The reaction still runs only where the metal touches water: its hydroxide does not dissolve away
+(no ions in solution), and a simulated second is a few milliseconds of chemistry, so a lump takes
+many simulated seconds to go.
 
 ### 7. Ammonia + hydrogen chloride makes radicals instead of NH₄Cl — High
 **Status: Improved.** The radicals came from the overlap flash; NH₃ and HCl now simply

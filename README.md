@@ -298,11 +298,15 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   their oxygens, and it needs water around the acid. Its heat is the real reaction's (2FE°).
   Titanium, zirconium, niobium, molybdenum, hafnium, tantalum and tungsten (oxide films) and lead
   (its sulfate seals it) do not dissolve. The iron sulfate does not dissolve away from the metal
-  (no ions in solution), so it gathers around the lump and slows the reaction.
+  (no ions in solution), so it gathers around the lump and slows the reaction. The most active
+  metals (standard potential −2.5 V or below: lithium, sodium, potassium, calcium, barium...)
+  take both protons from water itself the same way, giving the hydroxide and H₂
+  (2 Na + 2 H₂O → 2 NaOH + H₂), with the real heat 2F(E° + 0.41); any hydride they form turns
+  back into hydroxide and H₂ in water, and hydrogen goes into a metal (as a hydride) only hot.
   Still poorly reproduced: hydrocarbon flames stop at peroxyacids and polymers instead of going
   all the way to CO₂ (the high-temperature route through formaldehyde and CO is not modelled),
-  sodium reacts with water only at its surface and slowly, and with no ions in solution there is
-  no neutralisation and no NH₄Cl. Rusting at room temperature (electrochemical, over days) does
+  sodium reacts only at the surface it shows the water (its hydroxide does not dissolve away),
+  and with no ions in solution there is no neutralisation and no NH₄Cl. Rusting at room temperature (electrochemical, over days) does
   not happen. See `Known_Issues.md` for the full list.
 - Scale: moved at the speed of a real hand, nothing would visibly move in the time the simulation
   shows, so the hand moves things at a few times the thermal speed of their atoms, about 10^13
