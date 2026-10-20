@@ -83,6 +83,7 @@ below as soon as it is found, even if it is not fixed.
 | 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
 | 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | Open |
 | 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
+| 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point) as it hits, falling back over a couple of seconds. Thrown, it bounces off and keeps most of its motion (~500 K); held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once. The scale limit of the hand (see README), not the glass or the gas | Open (found while checking gas against the glass) |
 
 ### Root causes found during the fix pass
 
@@ -450,6 +451,29 @@ The reaction slows as the iron sulfate builds up around the lump (issue 38): the
 ions in solution, so the salt does not dissolve away. A screening of the ions' charges by the
 water around them was tried; it halved how strongly the sulfate held together but changed little,
 the products being slow to diffuse away through the viscous acid, and was left out.
+
+### Checked: water under a sunk lump, gas against the glass
+
+Two things that look wrong and were measured; both are what matter does at this scale (the jar is
+24 × 32 nm, an iron "ball" of 0.4 mol a few nm across).
+
+**Water under iron.** A ball of iron resting on the floor of dry glass touches it (its lowest atoms
+12–15 units up); in water its lowest point sits 26–31 units up, on one layer of water molecules.
+The glass is polar and holds water strongly (hydration layers on silica take very high pressures
+to squeeze out), so a monolayer under a nanometre ball is right. The rest of the water under it
+is the wedge around the curve of a round ball, which slowly squeezes out (100 water molecules
+under it at 6 s, about 55 at 18–24 s).
+
+**Gas between a solid and the glass.** Thrown at the wall, iron reaches the glass (its face at
+contact distance) with only about two N₂ molecules in the curved wedge beside the contact, and
+bounces off. Held against the glass, the gas there is squeezed out within about a second. A lump
+resting against the glass in 1 atm of N₂ has gas in the crevice beside it at the open jar's density
+(3.0 against 2.7 atoms per 10⁴ units²), so none is packed in; molecules do linger in the corner,
+where the wall and the floor both attract them, as they cling to bare glass (twice the open jar's
+density in a layer on the wall). Gas collisions also slow a thrown lump a lot (from 300 to 170 units/s
+in a second, stopped within ~500 units): a few-nanometre particle in a gas is in the free-molecule
+regime, where that is right. What did turn up: a lump held and rammed into the glass gets very hot
+(issue 44).
 
 ### Every element dropped
 
