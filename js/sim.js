@@ -146,6 +146,8 @@
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
     ACID_EA: 52, ACID_EA_PER_V: 30, ACID_EA_MIN: 25, // activation (kJ/mol) of a metal dissolving
     // in dilute acid, by the metal's standard potential (iron, -0.44 V: 39; zinc: 29; tin: 48)
+    WATER_E0: -2.5, // metals with a standard potential this low (the alkali metals, calcium, strontium,
+    // barium) take their protons from water itself: 2 Na + 2 H2O -> 2 NaOH + H2
     ACID_O_REACH: 2.5, // the other oxygen lies within this many metal-O contacts of the metal atom (a
     // layer of water or product between them, through which the protons pass)
     ACID_H_REACH: 5, // the two protons that leave as H2 lie within this many H-H contacts of each other
@@ -159,6 +161,7 @@
     LIGHT_YIELD: 15, // brightness of a reaction's flash per kJ/mol of heat it gives off (display units)
     AROMATIC_RES: 150, // resonance energy (kJ/mol) of an aromatic ring (benzene)
     NETWORK_O2_BARRIER: 60, // extra activation (kJ/mol) for O2 on an edge of a covalent network
+    HYDRIDE_BARRIER: 60, // extra activation (kJ/mol) for H2 splitting onto a metal into a hydride
     PASSIVE_BARRIER: 85, // extra activation (kJ/mol) for a halogen splitting on a metal that does not
     // react by electron transfer (iron, copper...): its own halide layer slows it at room temperature
     SPIN_BARRIER: 60, // extra activation (kJ/mol) when closed-shell molecules or metal surfaces
@@ -533,6 +536,7 @@
       const R = Math.sqrt(count * spacing * spacing * (diatomic ? 2 : 0.866) / Math.PI) + 2 * r;
       cx = Math.min(Math.max(cx, Math.min(R, P.W / 2)), Math.max(P.W - R, P.W / 2));
       cy = Math.min(Math.max(cy, Math.min(R, P.H / 2)), Math.max(P.H - R, P.H / 2));
+      cy = this.dropAbove(cx, cy, R);
     }
     // covalent network solids are laid down already bonded, in their natural structure
     const net = !gas && !diatomic ? networkKind(z) : 0;
@@ -594,6 +598,26 @@
     }
     return { atoms: this.n - added0, units: placed, requested: count };
   };
+
+  // A lump released inside a liquid or solid (a click below a pool's surface) has no room there:
+  // its atoms were scattered into whatever gaps they found nearby, a loose cloud far wider than the
+  // lump. If its centre would be inside material, it is released just above it instead, and falls
+  // in. If there is no room above either, the drop point is kept. Returns the centre height to use.
+  S.dropAbove = function (cx, cy, R) {
+    // (the surface: most of the material under the drop point, not a stray droplet above it)
+    const ys = [];
+    for (let i = 0; i < this.n; i++) {
+      if (this.condF[i] < 0.5 || Math.abs(this.x[i] - cx) > R || this.y[i] < cy - R) continue;
+      ys.push(this.y[i]);
+    }
+    if (ys.length < 20) return cy;
+    ys.sort(function (p, q) { return p - q; });
+    const top = ys[Math.floor(0.1 * ys.length)];
+    if (top > cy) return cy; // (nothing in the way, or the lump only dips into it)
+    const up = top - R - 2 * P.SPAWN_GAP * 20;
+    return up > R ? up : cy;
+  };
+
 
   // Elements that bond to themselves into a covalent network (boron, carbon, silicon, phosphorus,
   // sulfur and their heavier kin) are not added as loose atoms: dropped in a heap, they would
@@ -2993,6 +3017,7 @@
       // ...nor with itself: it is laid down in its natural form (see addNetwork), and bonds swapping
       // about while the strain of its first moments is still being drained would flash it hot
       if (this.selfSettling(i, j)) continue;
+      if (this.hydrolyseHydride(i, j) || this.hydrolyseHydride(j, i)) continue;
       const T = 0.5 * (this.tLoc[i] + this.tLoc[j]);
       let RT = P.R_KJ * Math.max(T, 1);
       const E1 = C.pairEnergy[p * 4 + 1];
@@ -3018,6 +3043,10 @@
         if (isMetal[el[a]]) {
           if (this.dissociativeAdsorption(a, b, RT)) continue;
           if (this.acidDissolve(a, b, RT)) continue;
+          // (the most active metals react with water only that way, giving H2 and the hydroxide:
+          // taking one H at a time off water, or off the NaOH just made, set H atoms free, which
+          // stuck to the metal as NaH, and left Na2O; calcium took water's H as CaH, freeing OH)
+          if (E[el[a]].e0 <= P.WATER_E0 && ((el[b] === 8 && this.hasH(b)) || (el[b] === 1 && this.nb[b] === 1 && el[this.bp[b * P.MAXB]] === 8))) continue;
           // a metal surface does not half-open O2 or Cl2 into a peroxide or superoxide (M-O-O.) or
           // knock a lone O atom off it: diatomics split across two metal atoms (above). A lone metal
           // atom in the gas does pluck one atom off a halogen (Na + Cl2 -> NaCl + Cl, the harpoon
@@ -3209,7 +3238,10 @@
     // aluminium the first layer of halide has to be broken through (iron burns in chlorine only once
     // heated to about 500 K; chlorine is stored in steel cylinders)
     const passive = en[el[a]] >= P.ET_EN && !spin ? P.PASSIVE_BARRIER : 0;
-    const Ea = P.ALPHA_DISS * eXX + Math.max(0, dH) + spin + passive;
+    // (hydrogen goes into a metal only hot: lithium, sodium and calcium take it up as hydrides at a
+    // few hundred degrees, not from the H2 they give off in water)
+    const hydride = eX === 1 ? P.HYDRIDE_BARRIER : 0;
+    const Ea = P.ALPHA_DISS * eXX + Math.max(0, dH) + spin + passive + hydride;
     if (!(this.rng() < Math.exp(Math.min(0, lnColl() - Ea / RT))) || !this.canAfford(a, b, dH)) return false;
     this.beginEvent(a, b, k, m);
     this.setBond(b, k, 0);
@@ -3219,6 +3251,39 @@
     this.heat(a, b, -dH);
     this.logReaction();
     return true;
+  };
+
+  // A hydride of one of the most active metals meeting water: M-H + H-OH -> M-OH + H2, at once
+  // (CaH2 + 2 H2O -> Ca(OH)2 + 2 H2). Hydrogen that the hot metal took up as it reacted with water
+  // was otherwise left as CaH and BaH. Returns true when it happened.
+  S.hydrolyseHydride = function (m, o) {
+    const el = this.el;
+    if (!isMetal[el[m]] || el[o] !== 8 || !(E[el[m]].e0 <= P.WATER_E0) || !this.isWaterO(o)) return false;
+    const MB = P.MAXB, x = this.x, y = this.y;
+    let h = -1;
+    for (let k = 0; k < this.nb[m]; k++) { const j = this.bp[m * MB + k]; if (el[j] === 1 && this.nb[j] === 1) { h = j; break; } }
+    if (h < 0) return false;
+    const p0 = this.bp[o * MB], p1 = this.bp[o * MB + 1];
+    const hw = (x[p0] - x[h]) ** 2 + (y[p0] - y[h]) ** 2 < (x[p1] - x[h]) ** 2 + (y[p1] - y[h]) ** 2 ? p0 : p1;
+    const pMO = el[m] * NZ + 8, pMH = el[m] * NZ + 1;
+    const dH = C.pairEnergy[pMH * 4 + 1] + C.stepEnergy(8, 1, 1) - C.pairEnergy[pMO * 4 + 1] - C.bondEnergy(1, 1, 1);
+    const RT = P.R_KJ * Math.max(0.5 * (this.tLoc[m] + this.tLoc[o]), 1);
+    const Ea = P.ACID_EA_MIN + Math.max(0, dH);
+    if (!(this.rng() < Math.exp(Math.min(0, lnColl() - Ea / RT))) || !this.canAfford(m, o, dH)) return false;
+    this.beginEventN([m, o, h, hw]);
+    this.setBond(m, h, 0);
+    this.setBond(o, hw, 0);
+    this.addBond(m, o, 1, C.pairClass[pMO]);
+    this.addBond(h, hw, 1, C.pairClass[1 * NZ + 1]);
+    this.endEvent(m, o);
+    this.heat(m, o, -dH);
+    this.logReaction();
+    return true;
+  };
+
+  S.hasH = function (o) {
+    for (let k = 0; k < this.nb[o]; k++) if (this.el[this.bp[o * P.MAXB + k]] === 1) return true;
+    return false;
   };
 
   // Is the proton h of an acid in the water: a water molecule next to its OH group? An oxoacid
@@ -3253,7 +3318,9 @@
     const x = this.x, y = this.y, self = this, MB = P.MAXB;
     // the other proton: on another acid OH oxygen at the metal, or (if b is an acid's) on a water
     // molecule there; protons hop through the water, so the two need not be side by side. One of
-    // the two at least comes from the acid: water alone does not dissolve iron.
+    // the two at least comes from the acid: water alone does not dissolve iron. It does dissolve
+    // the most active metals (WATER_E0), which take both protons from water molecules.
+    const fromWater = e0 <= P.WATER_E0;
     const reachO = pairSigma[ea * NZ + 8] * P.ACID_O_REACH, reachM = pairSigma[ea * NZ + ea] * 1.6;
     const reachH = P.ACID_H_REACH * pairSigma[1 * NZ + 1];
     // (a takes both oxygens if it has the valence, as iron does: Fe2+; a neighbour takes the
@@ -3269,17 +3336,18 @@
       return (x[p0] - x[ref]) ** 2 + (y[p0] - y[ref]) ** 2 < (x[p1] - x[ref]) ** 2 + (y[p1] - y[ref]) ** 2 ? p0 : p1;
     };
     if (!bAcid) h = nearest(b, a);
-    let b2 = -1, h2 = -1, m = -1, best = reachH * reachH;
+    let b2 = -1, h2 = -1, m = -1, b2Acid = false, best = reachH * reachH;
     for (const s of surf) {
       this.query(x[s], y[s], reachO, function (j) {
         if (j === b || el[j] !== 8 || (x[j] - x[s]) ** 2 + (y[j] - y[s]) ** 2 > reachO * reachO) return;
         let k = self.acidicH(j);
-        if (k >= 0 && !self.solvatedH(k)) return;
+        const acid = k >= 0;
+        if (acid && !self.solvatedH(k)) return;
         // (a water molecule: the metal ends up with its OH, Fe(OH)(HSO4), hydrated iron sulfate)
-        if (k < 0 && bAcid && self.isWaterO(j)) k = nearest(j, h);
+        if (k < 0 && (bAcid || fromWater) && self.isWaterO(j)) k = nearest(j, h);
         if (k < 0 || k === h) return;
         const d2 = (x[k] - x[h]) ** 2 + (y[k] - y[h]) ** 2;
-        if (d2 < best) { best = d2; b2 = j; h2 = k; m = s; }
+        if (d2 < best) { best = d2; b2 = j; h2 = k; m = s; b2Acid = acid; }
       });
     }
     if (b2 < 0) return false;
@@ -3298,7 +3366,9 @@
     // the heat given off is the real reaction's, 2 F E0 (iron 85 kJ/mol, zinc 147, magnesium 457):
     // the model's bond energies, made for molecules in the gas, leave out the water around the
     // ions and overstate it (iron's would be 280, zinc's hot enough to set off side reactions)
-    this.heat(a, b, -2 * 96.485 * e0);
+    // (taking both protons from water, whose own are harder to reduce, gives off 2 F (E0 + 0.41):
+    // sodium 444 kJ per H2)
+    this.heat(a, b, -2 * 96.485 * (bAcid || b2Acid ? e0 : e0 + 0.414));
     this.logReaction();
     return true;
   };

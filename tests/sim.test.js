@@ -1014,6 +1014,33 @@ test('a lump pushed into the glass by the hand heats up but stays below its melt
   }
 });
 
+test('sodium in water gives sodium hydroxide and hydrogen, not sodium hydride', function () {
+  // 2 Na + 2 H2O -> 2 NaOH + H2: it used to take water's H one atom at a time, slowly, leaving NaH,
+  // Na2O and free H atoms
+  const sim = newSim(1);
+  sim.fillMixture([{ tpl: H2O_TPL, count: 1 }], 293, { fill: 0.08 });
+  sim.addMoles(Z('Na'), 0.06, P.W / 2, P.H * 0.92 - 160);
+  run(sim, 8);
+  const naoh = mol(sim, 'HNaO'), h2 = mol(sim, 'H2');
+  assert.ok(naoh >= 0.008, 'NaOH ' + naoh.toFixed(3) + ' mol');
+  assert.ok(h2 >= 0.004, 'H2 ' + h2.toFixed(3) + ' mol');
+  assert.ok(Math.abs(naoh - 2 * h2) <= 0.003, 'two NaOH per H2: ' + naoh.toFixed(3) + ', ' + h2.toFixed(3));
+  assert.ok(mol(sim, 'HNa') + mol(sim, 'Na2O') + mol(sim, 'H') < 0.002, 'side products');
+});
+
+test('a lump dropped below the surface of a pool comes out as a lump above it, not a cloud', function () {
+  const sim = newSim(1);
+  sim.fillMixture([{ tpl: H2O_TPL, count: 1 }], 293, { fill: 0.15 });
+  run(sim, 0.5);
+  const n0 = sim.n;
+  sim.addMoles(Z('Fe'), 0.15, P.W / 2, P.H - 150); // a click near the bottom of the water
+  let x0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = n0; i < sim.n; i++) { x0 = Math.min(x0, sim.x[i]); x1 = Math.max(x1, sim.x[i]); y1 = Math.max(y1, sim.y[i]); }
+  assert.strictEqual(sim.n - n0, 150, 'all of it went in');
+  assert.ok(x1 - x0 < 600, 'lump ' + (x1 - x0).toFixed(0) + ' wide (it used to scatter 1400 wide)');
+  assert.ok(y1 < P.H * 0.85, 'released above the water');
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

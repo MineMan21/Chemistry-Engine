@@ -290,7 +290,9 @@
     let half = Math.sqrt(n / 0.87) * a0 / 2 + a0;
     // a square patch, stretched downward/upward when wider than the jar
     const hx = Math.min(P.W / 2 - 10, half), hy = Math.min(P.H / 2 - 10, half * half / hx);
-    const cx = Math.min(P.W - hx - 5, Math.max(hx + 5, x)), cy = Math.min(P.H - hy - 5, Math.max(hy + 5, y));
+    const cx = Math.min(P.W - hx - 5, Math.max(hx + 5, x));
+    let cy = Math.min(P.H - hy - 5, Math.max(hy + 5, y));
+    if (!m.gas) cy = sim.dropAbove(cx, cy, Math.max(hx, hy)); // (not inside a pool: on top of it)
     const before = sim.n;
     const placed = sim.addMolecules(m, n, cx, cy, { x: hx, y: hy }, P.AMBIENT, spacing);
     afterAdd(before, placed, count);
