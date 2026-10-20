@@ -134,6 +134,7 @@
     ALPHA: 0.15, // fraction of broken-bond energy needed as activation (Evans-Polanyi like)
     ALPHA_ET: 0.03, ET_EN: 1.1, // same for metals below this electronegativity (electron transfer)
     ALPHA_DISS: 0.1, // same for a diatomic splitting across a metal surface (2 M + O2 -> 2 M-O)
+    SH2_MAX: 250, // kJ/mol: a radical displaces a group at a saturated centre only across a bond weaker than this
     ALPHA_4C: 0.4, // same for concerted four-centre exchanges between two whole molecules: they are
     // symmetry forbidden, so stable substances (sulfuric acid, benzene) do not condense or
     // polymerise by themselves; real reactions of this kind go through radicals, ions or catalysts
@@ -171,7 +172,7 @@
     MAX_STEP: 6, // max displacement per substep (keeps the integrator stable; a limit per substep
     // whatever DT is: clipping bonded atoms harder pumps energy into stiff networks such as graphite)
     TCELL: 160, // size of the coarse cells used for the local temperature field
-    T_PRIOR: 2,
+    T_PRIOR: 8,
     SELF_T_RATE: 0.02, // EMA rate of an atom's own kinetic temperature (per substep)
     SELF_T_WEIGHT: 0.5, // weight of that own temperature in the local temperature // pseudo-count pulling sparse cells toward the jar temperature
     GAS_T_WEIGHT: 0.1, // weight of gas in the local temperature where liquid or solid is present
@@ -2733,6 +2734,18 @@
   };
 
   // Weakest bond unit of atom a, excluding partner `skip`. Returns partner index or -1.
+  // The hydrogen of an oxoacid's OH group on oxygen o (sulfuric, phosphoric, nitric acid: the
+  // oxygen's other neighbour is a hypervalent centre), or -1
+  S.acidicH = function (o) {
+    this._acidH = -1;
+    if (this.el[o] !== 8 || this.nb[o] !== 2) return -1;
+    const MB = P.MAXB, p = this.bp[o * MB], q = this.bp[o * MB + 1];
+    const h = this.el[p] === 1 ? p : this.el[q] === 1 ? q : -1, c = h === p ? q : p;
+    if (h < 0 || this.el[c] === 1 || !(this.used[c] > normVal[this.el[c]])) return -1;
+    this._acidH = h;
+    return h;
+  };
+
   S.weakestBond = function (a, skip) {
     const MB = P.MAXB, base = a * MB, ea = this.el[a];
     let best = -1, bestE = Infinity, spin = false;
@@ -2812,8 +2825,23 @@
           // reaction), but not off spin-paired O2
           if (this.nb[b] === 1 && el[this.bp[b * P.MAXB]] === el[b] && !isMetal[el[b]] && (el[b] === 8 || this.hasMetalNeighbour(a))) continue;
         }
-        const k = this.weakestBond(b, a);
+        // A radical takes a terminal atom (H. + Cl-Cl, Cl. + H-CH3) or adds across a true pi bond
+        // (H. + O=O, a radical + C=C); it does not attack a hypervalent centre, whose S=O or P=O
+        // 'double bonds' are polar, not pi bonds open to addition, nor (unless it is a metal,
+        // which hands over an electron) swap a group at a saturated centre holding several
+        // single bonds, homolytic substitution there being far too slow, except across a weak
+        // bond (H. + HO-OH -> H2O + .OH, RS. + RS-SR). (A radical made from sulfuric acid used to
+        // bond to the next molecule's sulfur, pass the radical on and grow S-O-S chains.)
+        if (this.used[b] > normVal[el[b]]) continue;
+        // (a metal meeting an oxoacid's OH oxygen takes the acidic hydrogen's place, M + HO-SO3H
+        // -> M-O-SO3H + H., not the weakest bond by homolytic energy, the S-O one: the acid's
+        // O-H gives way as a proton would, while the S-O bond stays)
+        const k = isMetal[el[a]] && this.acidicH(b) >= 0 ? this.acidicH(b) : this.weakestBond(b, a);
+        if (k >= 0 && k === this._acidH) this._weakE = C.stepEnergy(el[b], 1, 1);
         if (k < 0 || el[k] === el[a]) continue; // X. + X-Y -> X-Y + X. changes nothing
+        if (this.nb[b] > 1 && this.bondOrder(b, k) < 2 && !isMetal[el[a]] && this._weakE >= P.SH2_MAX) continue;
+        // (nor across the oxygen end of a hypervalent S=O: copper used to add to sulfuric acid)
+        if (this.bondOrder(b, k) >= 2 && this.used[k] > normVal[el[k]]) continue;
         const step = this._weakE;
         // after losing a unit, b must be able to bond with a (hypervalence rule)
         if (this.used[b] > normVal[el[b]] && !(en[el[a]] > en[el[b]] + 0.3)) continue;

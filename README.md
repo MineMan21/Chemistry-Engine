@@ -118,7 +118,11 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - **Reactions** happen when atoms collide, with Arrhenius probabilities at the local
   temperature:
   - radical + radical → bond (almost no barrier),
-  - radical abstraction (a free valence steals a bond unit, e.g. Na + Cl₂ → NaCl + Cl),
+  - radical abstraction (a free valence steals a bond unit, e.g. Na + Cl₂ → NaCl + Cl). A
+    radical takes a terminal atom (H, a halogen) or adds across a true π bond (O₂, C=C). It does
+    not attack a hypervalent centre (the S of sulfuric acid: its S=O bonds are polar, not π bonds
+    open to addition), nor displace a group at a saturated centre unless the bond it breaks is
+    weak (peroxide O–O, S–S). A metal meeting an oxoacid's OH takes the acidic hydrogen's place,
   - atom transfer in hot zones (H + O₂ → OH + O), which branches flame chains,
   - a diatomic molecule splitting across a metal surface (2 M + O₂ → 2 M–O, 2 Na + Cl₂ → 2 NaCl),
     which is how metals oxidise: no stray O atoms or peroxides,

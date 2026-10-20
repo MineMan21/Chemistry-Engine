@@ -26,7 +26,7 @@ below as soon as it is found, even if it is not fixed.
 
 | # | Issue | Status |
 | --- | --- | --- |
-| P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers | **Fixed**: see below |
+| P | Reactive substances (sulfuric acid, benzene) react with themselves into polymers; sulfuric acid still did once something was dropped in | **Fixed**: see below and "Sulfuric acid with something dropped in" |
 | L | Flames give off no light | **Fixed**: see below |
 | W | 2:1 H₂/O₂ burns to junk; sparking or heating water makes new molecules | **Fixed** except a few lingering radicals: see below |
 | D | Dropped iron (and tungsten) dents; metals too malleable | **Fixed**: directional bonding, and much gentler gravity for falling solids; see below |
@@ -70,6 +70,8 @@ below as soon as it is found, even if it is not fixed.
 | 28 | Metal hardness follows the melting point only: at the same impact speed tungsten (real hardness 5.6x iron's) dents about as much as iron. Thrown by hand, heavy metals now leave the hand slower (equal energy per atom), so tungsten lands whole where iron dents | **Improved**: see "Throwing tungsten" below |
 | 29 | Graphite on an 800 K hot plate (insulated jar) reads 900–1300 K depending on the run, mostly ~1200 K: about 1.5x hot. Its test passed only because its one random seed happened to read 936 K; it now averages three runs | Open |
 | 30 | The Moles view lags more than the other two | **Fixed**: it rebuilt and uploaded a full-screen image every frame (about 5 million pixels on a high-resolution screen); it now draws its squares directly, grouped by colour (0.7 ms a frame, was 3.1 ms at 2x pixel density, plus the upload) |
+| 31 | Sulfuric acid does not take part in acid–base or acid–metal reactions: with NH₃, NaOH or NaCl nothing happens (real: ammonium sulfate; sodium sulfate and water; HCl and NaHSO₄); iron and copper stay inert (right for cold concentrated acid), zinc does not react (real: slowly), sodium gives Na₂O and NaOH instead of Na₂SO₄ + H₂. These go through protons and ions, which the model does not have (as issues 7 and 8) | Open |
+| 32 | A lone fast molecule in a nearly empty patch of vapour read thousands of kelvin, enough to break its bonds and set its neighbours off | **Fixed**: sparse cells lean harder on the jar's temperature (T_PRIOR 2 → 8) |
 
 ### Root causes found during the fix pass
 
@@ -351,6 +353,44 @@ What's left: damage depends mostly on impact speed (every metal tried stays whol
 really is. Lead,
 which is very soft, now survives a throw because it is thrown slower; at iron's speed it
 dented badly (20.5%).
+
+### Sulfuric acid with something dropped in
+
+Reported: sulfuric acid sat fine on its own, but once something was dropped into it, it reacted
+with that and with itself into huge polymer chains.
+
+Checked against real chemistry: pure sulfuric acid holds only a trace of disulfuric acid, and
+nothing that reacts with it turns it into long S–O–S chains. The chains were wrong.
+
+| 300 H₂SO₄, 20 s after adding | Before: largest molecule, S–O–S bridges | After |
+| --- | --- | --- |
+| Nothing | 21 atoms, 5 (some runs ran away to ~190 reactions) | 7 atoms (all 300 intact), 0 |
+| 200 water | 14 atoms, 2 | 7 atoms (all intact), 0 |
+| 0.1 mol iron | 87 atoms, 46 | 7 atoms, 0 |
+| 0.1 mol copper | 21 atoms, 9 | 11 atoms, 1 |
+| 0.1 mol zinc | 15 atoms, 6 | 18 atoms, 2 |
+| 0.1 mol sodium | 14 atoms, 4 | 8 atoms, 0 |
+| On a 650 K plate | 75 atoms | 17 atoms (short polysulfuric acids, as near-boiling acid loses water) |
+
+Causes and fixes:
+
+- **Radicals attacked the acid's sulfur.** Once a metal knocked a hydrogen off a molecule, the
+  •O–SO₃H radical bonded to the sulfur of the next molecule (allowed because oxygen is more
+  electronegative than hypervalent sulfur) and passed the radical on, so the chain grew. Real
+  radicals neither add to the polar S=O bonds of sulfate nor substitute at its crowded sulfur.
+  Now a radical does not attack a hypervalent centre, does not add across the oxygen end of a
+  hypervalent S=O, and does not displace a group at a saturated centre unless the bond broken is
+  weaker than 250 kJ/mol (peroxide O–O, S–S, N–N: H + H₂O₂ → H₂O + OH still runs).
+- **A metal broke the wrong bond.** A metal meeting the acid's OH oxygen broke the S–O bond
+  (the weakest by homolytic energy), leaving metal hydroxides and SO₃H fragments. An acid's O–H
+  gives way as a proton would, so the metal now takes the hydrogen's place.
+- **A lone fast molecule read as a hot spot.** A molecule that had just evaporated into a nearly
+  empty patch of vapour set its patch's temperature reading, up to ~3000 K. That broke its S–O
+  bonds and set off the cascade that seeded the chains even in pure acid. Sparse cells now lean
+  harder on the jar's temperature.
+
+Hydrogen and methane flames burn as before (hydrogen: ~907 of 1000 H₂O; before: 902–919). Acid–
+base and acid–metal reactions remain missing (issue 31).
 
 ### Every element dropped
 
