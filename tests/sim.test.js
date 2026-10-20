@@ -846,6 +846,38 @@ test('sulfuric acid and benzene do not react with themselves at room temperature
   });
 });
 
+test('a metal dropped into sulfuric acid does not grow it into S-O-S chains', function () {
+  // A radical made from the acid used to bond to the next molecule's sulfur and pass the radical
+  // on (radicals do not add to the polar S=O of sulfate, nor substitute at its crowded sulfur),
+  // and a lone fast molecule in the vapour read thousands of kelvin and set the acid off
+  const H2SO4 = { atoms: [[16, 0, 0], [8, 0, -14.9], [8, 0, 14.9], [8, -17.1, 0], [1, -26.8, 0], [8, 17.1, 0], [1, 26.8, 0]],
+    bonds: [[0, 1, 2], [0, 2, 2], [0, 3, 1], [3, 4, 1], [0, 5, 1], [5, 6, 1]] };
+  const sim = newSim(1);
+  sim.addMolecules(H2SO4, 300, P.W / 2, P.H - 300, { x: 700, y: 300 });
+  run(sim, 6);
+  sim.addMoles(Z('Fe'), 0.1, P.W / 2, P.H - 900);
+  run(sim, 15);
+  const seen = new Uint8Array(sim.n);
+  let biggest = 0, bridges = 0;
+  for (let i = 0; i < sim.n; i++) {
+    let s = 0;
+    for (let k = 0; k < sim.nb[i]; k++) if (sim.el[sim.bp[i * P.MAXB + k]] === Z('S')) s++;
+    if (sim.el[i] === Z('O') && s >= 2) bridges++;
+    if (seen[i]) continue;
+    const stack = [i];
+    let size = 0;
+    seen[i] = 1;
+    while (stack.length) {
+      const a = stack.pop();
+      size++;
+      for (let k = 0; k < sim.nb[a]; k++) { const b = sim.bp[a * P.MAXB + k]; if (!seen[b]) { seen[b] = 1; stack.push(b); } }
+    }
+    biggest = Math.max(biggest, size);
+  }
+  assert.ok(biggest < 20 && bridges <= 4, 'largest molecule ' + biggest + ' atoms, ' + bridges + ' S-O-S bridges');
+  assert.ok(mol(sim, 'H2O4S') > 0.26, 'sulfuric acid left: ' + mol(sim, 'H2O4S').toFixed(3) + ' mol');
+});
+
 test('a hydrogen flame gives off light, violet-blue', function () {
   const sim = newSim(62);
   sim.addMoles(Z('H'), 1, P.W / 2, P.H / 2); sim.addMoles(Z('O'), 0.5, P.W / 2, P.H / 2);
