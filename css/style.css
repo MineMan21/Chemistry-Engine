@@ -276,6 +276,13 @@ output { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums;
 
 /* tools and molecules */
 .tool-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.45; }
+.mix-head, .mix-row { display: grid; grid-template-columns: minmax(0, 1fr) 58px 76px 24px; gap: 6px; align-items: center; }
+.mix-head { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.mix-row { margin: 4px 0; }
+.mix-row select, .mix-row input[type=number] { width: 100%; min-width: 0; }
+.mix-row .del { padding: 2px 0; border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.mix-row .del:hover { color: var(--danger); }
+#mix-summary { margin-bottom: 8px; }
 .subhead { font-size: 12px; color: var(--muted); font-weight: 600; margin: 12px 0 6px; }
 .mol-chips button { display: inline-flex; align-items: center; gap: 6px; }
 .mol-chips button.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
