@@ -81,7 +81,7 @@ below as soon as it is found, even if it is not fixed.
 | 39 | Magnesium in dilute sulfuric acid: the reaction's heat (457 kJ/mol, the real value) speeds up magnesium's own radical reaction with water, giving Mg–H, MgO and H atoms as side products | Open |
 | 40 | Material dropped inside a liquid (a click below its surface) has no free space where it lands, so its atoms are placed wherever they fit nearby: a 0.15 mol iron lump came out as a loose cloud 1400 units wide and tall instead of a lump | **Fixed**: a solid or liquid released inside material is released just above it instead, and falls in as a lump |
 | 41 | Iron lying in cold concentrated sulfuric acid now and then breaks an acid's S–OH bond (HO₃S and OH radicals): 1–3 times in 24 s for 0.15 mol of iron. Seen since iron sinks into the acid instead of resting on it; none in 24 s before | Open |
-| 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out. Measured: 30 H₂ molecules placed at the bottom of water are still ~150 units deep after 12 s, only ~13% above the surface. The model has no hydrophobic effect: the dispersion pull of many water neighbours makes non-polar gases prefer the water, where real water's hydrogen-bond network pushes them out (H₂ barely dissolves). The same likely makes oil and water mix too readily | Open (cause found) |
+| 42 | H₂ given off under the liquid stays among its molecules for a while (Contents lists it as liquid/solid) instead of bubbling straight out | **Explained, partly improved**: see "Gases in water and the hydrophobic effect". Gases barely dissolve from above (0–2 of 200 atoms), as in reality; gas made under water leaves only by diffusing out, slowly, because a few molecules cannot make a bubble (at this scale a real one could not exist either) |
 | 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
 | 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point; cell readings up to 2900 K) as it hits; lead to ~1150 K. Thrown, it bounces off and keeps most of its motion; held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once | **Fixed**: while the hand holds a solid that touches the glass (or for 4 s after throwing one), each part of it is kept to at most 80% of its melting point, the rest of the heat going into the hand and the glass; once against the glass the hand presses it on at no more than 30 units/s instead of ramming on. Iron now peaks around 900 K, lead 460 K, gold 470 K, and they still heat and dent on impact. See "Pushing a solid into the glass" |
 | 45 | Barium in water still leaves a little BaH₂ and BaH (~0.006 mol from 0.06 mol of barium in 10 s): the hot metal takes up some of the H₂ it gives off faster than water hydrolyses the hydride | Open (found while fixing issue 6) |
@@ -505,6 +505,35 @@ against the glass all of it became heat: iron reached 2900 K in places, lead 115
 | Gold | 1519 K | ~470 K | 1337 K |
 
 (hottest coarse-cell reading of the lump)
+
+### Gases in water and the hydrophobic effect
+
+Issue 42 looked like a missing hydrophobic effect (water pushing non-polar molecules out). Measured:
+
+- **From above, gases do not dissolve.** 0.1 mol of H₂ or N₂ over a pool of water: after 12 s,
+  0 and 2 of 200 atoms are in the water, as for real gases (H₂: 1/50 of its gas-phase
+  concentration). That was already so.
+- **Oil and water already parted, weakly.** Benzene dealt evenly through water rises to the top and
+  gathers, but in a small pool only 26% of each carbon's neighbours (from other molecules) were
+  benzene. Water's hydrogen bonds did the work; the rest of the hydrophobic effect is an entropy of
+  water's network that a pair potential lacks. The dispersion well between a water atom and a
+  non-polar atom (partial charge under 0.5, no hydrogen bond, and not an N, O or F carrying an H:
+  H₂, N₂, O₂, the C and H of hydrocarbons) is now cut to 30% (HYDROPHOBIC): 54% in the same test, 67% in a larger pool (37%
+  before). Ethanol, held to water by its OH, stays mixed (36%). (Counting the O of H₂O₂ as
+  non-polar, its charge being small, slowed hot peroxide's decomposition by a third; an N, O or F
+  with an H on it now always counts as polar.)
+- **A molecule far above its boiling point is a gas even when crowded.** Any molecule packed
+  against others felt the liquids' settling force (150 times the gas's), so N₂ that touched a
+  pool was pulled toward it. Now a molecule hotter than twice its boiling point (H₂, N₂, O₂, CH₄;
+  not NH₃, HCl or CO₂, which dissolve well) never feels it.
+- **H₂ made under water stays dissolved for minutes.** It is not held: a lone molecule in water
+  only wanders, and leaves by diffusing to the surface, a few units a second at best, so from the
+  bottom of a 480-unit pool it takes about a minute. Pulling it up as a bubble would rise (tried,
+  up to 2.7 times the liquids' settling force) did nothing: collisions push it about ~50 times
+  harder. Real gas escapes in bubbles, but a few molecules cannot make one, and at this scale (a
+  pool a few nanometres deep) a real bubble could not exist either: its surface tension would
+  squeeze it at hundreds of atmospheres. Contents lists such gas as liquid/solid because it is
+  surrounded.
 
 ### Every element dropped
 

@@ -1041,6 +1041,49 @@ test('a lump dropped below the surface of a pool comes out as a lump above it, n
   assert.ok(y1 < P.H * 0.85, 'released above the water');
 });
 
+test('oil and water come apart (benzene rises to the top); ethanol and water stay mixed', function () {
+  const C6H6 = { atoms: [], bonds: [] };
+  for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; C6H6.atoms.push([6, 14 * Math.cos(a), 14 * Math.sin(a)]); }
+  for (let k = 0; k < 6; k++) {
+    const a = k * Math.PI / 3;
+    C6H6.atoms.push([1, 24.7 * Math.cos(a), 24.7 * Math.sin(a)]);
+    C6H6.bonds.push([k, (k + 1) % 6, k % 2 ? 1 : 2], [k, k + 6, 1]);
+  }
+  const EtOH = { atoms: [[6, 0, 0], [6, 15.2, 0], [8, 15.2, -14.2], [1, 24.9, -14.2], [1, 0, -10.7], [1, 0, 10.7], [1, -10.7, 0], [1, 15.2, 10.7], [1, 25.9, 0]],
+    bonds: [[0, 1, 1], [1, 2, 1], [2, 3, 1], [0, 4, 1], [0, 5, 1], [0, 6, 1], [1, 7, 1], [1, 8, 1]] };
+  function mixAndWait(tpl) {
+    const sim = newSim(1);
+    sim.fillMixture([{ tpl: H2O_TPL, count: 6 }, { tpl: tpl, count: 1 }], 293, { fill: 0.07 });
+    run(sim, 8);
+    // the share of the carbons' neighbours (carbon or water oxygen) that are carbons, and how far
+    // above the water the carbons sit
+    // (carbons of other molecules only: a molecule's own carbons are always beside each other)
+    const molOf = new Int32Array(sim.n).fill(-1);
+    let nm = 0;
+    for (let i = 0; i < sim.n; i++) if (sim.el[i] === Z('C') && molOf[i] < 0) { for (const a of sim.moleculeOf(i, [])) molOf[a] = nm; nm++; }
+    let share = 0, nC = 0, cy = 0, wy = 0, nW = 0;
+    for (let i = 0; i < sim.n; i++) {
+      if (sim.el[i] === Z('O') && sim.isWaterO(i)) { wy += sim.y[i]; nW++; }
+      if (sim.el[i] !== Z('C')) continue;
+      let c = 0, w = 0;
+      sim.query(sim.x[i], sim.y[i], 40, function (j) {
+        if (j === i || Math.hypot(sim.x[j] - sim.x[i], sim.y[j] - sim.y[i]) > 40) return;
+        if (sim.el[j] === Z('C') && molOf[j] !== molOf[i]) c++; else if (sim.isWaterO(j)) w++;
+      });
+      if (c + w) { share += c / (c + w); nC++; }
+      cy += sim.y[i];
+    }
+    let all = 0;
+    for (let i = 0; i < sim.n; i++) if (sim.el[i] === Z('C')) all++;
+    return { share: share / nC, above: wy / nW - cy / all };
+  }
+  const oil = mixAndWait(C6H6);
+  assert.ok(oil.share > 0.45, 'benzene beside other benzene: ' + oil.share.toFixed(2));
+  assert.ok(oil.above > 50, 'benzene above the water by ' + oil.above.toFixed(0));
+  const etoh = mixAndWait(EtOH);
+  assert.ok(etoh.share < 0.5, 'ethanol beside other ethanol: ' + etoh.share.toFixed(2));
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

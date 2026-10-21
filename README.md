@@ -260,7 +260,12 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   into water slides in rather than slamming in and flinging the water out. The glass walls and floor attract
   nearby molecules (strongly for hydrogen-bonding ones like water, weakly for non-polar ones,
   barely for metals) and hold liquid touching them with friction, which gives the meniscus and
-  clinging drops. Liquid touching the glass exchanges heat with it at room temperature.
+  clinging drops. Water and non-polar molecules (hydrocarbons, H₂, N₂, O₂) attract
+  each other at only 30% of their usual dispersion (the hydrophobic effect, which is mostly an
+  entropy of water's hydrogen-bond network a pair potential lacks), so oil and water part and
+  gases barely dissolve; a molecule hotter than twice its boiling point is never pulled down
+  as a liquid, even where it is crowded. Gas made under water (H₂ from a metal) leaves only by
+  diffusing out, slowly: a few molecules cannot make a bubble. Liquid touching the glass exchanges heat with it at room temperature.
 
 ### Approximations and known limits
 
