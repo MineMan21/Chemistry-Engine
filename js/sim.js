@@ -36,6 +36,9 @@
     // touch at the ionic bond length instead of at the neutral atoms' much larger contact
     KC: 2.0e8, // Coulomb constant (sim energy * units / e^2)
     PARTIAL_CHARGE: 0.3, // partial charge per unit electronegativity difference
+    HYDROPHOBIC: 0.3, // dispersion between water and a non-polar atom, relative to the usual
+    // (the hydrophobic effect: see updateHydrophobic)
+    NONPOLAR_Q: 0.5, // an atom with a partial charge smaller than this (and no H bond) is non-polar
     VDW_SCALE: 2.25, // calibration factor for van der Waals well depths (2D, short-ranged well)
     MOL_POLARIZABILITY: 0, // (disabled) per-bond dispersion boost; it made bonding exothermic
     HB_EPS: 800, // hydrogen bond well depth (K) for O-H...O; F stronger, N weaker (water gets more of
@@ -134,6 +137,7 @@
     LIQ_DENSITY: 43.7, // real density (g/cm3) per unit of 2D density (u per unit^2) of a liquid
     // as the model packs it (water: 0.0229 for 1.00 g/cm3; sulfuric acid comes out 52, 1:3 acid
     // and water 59): sets how much a metal immersed in a liquid sinks (see metalSink)
+    GAS_ABOVE_BOIL: 2, // ...and above this multiple of its boiling point a molecule never settles
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
     BULK_VMAX: 900, // max bulk (flow) speed of condensed matter, units/s (falling drops)
@@ -363,6 +367,7 @@
     this.condF = new Float32Array(M); // smoothed 'part of a liquid/solid' flag (0..1), sets gravity
     this.molId = new Int32Array(M);
     this.hbd = new Uint8Array(M); // hydrogen-bond donor (H bonded to N, O or F)
+    this.hydro = new Uint8Array(M); // 1 water, 2 non-polar (see updateHydrophobic)
     // batch tag of atoms added together as an element: bonds between same-element atoms of one
     // batch just assemble the element's standard state (S8, graphite...), which releases no heat
     this.tag = new Int32Array(M);
@@ -371,6 +376,7 @@
     this.anneal = new Uint16Array(M); // substeps of strong thermostatting left after being added
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
+    this.boilT = new Float32Array(M); // ...and its boiling (or subliming) point at 1 atm (0: unknown)
     this.netF = new Uint8Array(M); // 1: part of a covalent network (graphite, silicon, sulfur chains)
     this.arom = new Uint8Array(M); // 1: in an aromatic six-membered ring (benzene)
     this.coh = new Float32Array(M).fill(1); // cohesion factor of the molecule (see COHESION)
@@ -468,7 +474,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0; this.born[i] = tag || 0; this.solidF[i] = 2;
     this.anneal[i] = Math.round(P.ANNEAL_STEPS * P.DT_REF / P.DT);
-    this.meltT[i] = 0; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
+    this.meltT[i] = 0; this.boilT[i] = 0; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -1078,7 +1084,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.born[i] = this.born[last]; this.solidF[i] = this.solidF[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.born[i] = this.born[last]; this.solidF[i] = this.solidF[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.boilT[i] = this.boilT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
     this.grainOf[i] = this.grainOf[last];
     if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
     this.grainOf[last] = -1;
@@ -1468,6 +1474,24 @@
     this.nlTopo = this.topo; this.nlN = n; this.nlCell = this.cellSize; this.nlReach = this.reach;
   };
 
+  // The hydrophobic effect: water keeps to its own hydrogen bonds and pushes non-polar molecules
+  // (H2, N2, O2, hydrocarbons) out, which is why they barely dissolve in it and oil and water part.
+  // That is mostly the cost to water's hydrogen-bond network of making room for them (an entropy),
+  // which a pair potential does not have. Its hydrogen bonds already did most of it (benzene came
+  // apart from water, 95% of its neighbours its own kind); the dispersion well between a water
+  // atom and a non-polar atom is cut to HYDROPHOBIC on top (98%; ethanol, held by its OH, still
+  // mixes). Marks each atom: 1 water, 2 non-polar.
+  S.updateHydrophobic = function () {
+    const n = this.n, el = this.el, MB = P.MAXB, h = this.hydro;
+    for (let i = 0; i < n; i++) {
+      const z = el[i];
+      if (z === 8 ? this.isWaterO(i) : z === 1 && this.nb[i] === 1 && this.isWaterO(this.bp[i * MB])) h[i] = 1;
+      // (an N, O or F with an H on it hydrogen-bonds, whatever its charge: the O of H2O2)
+      else h[i] = !this.ion[i] && !this.hbd[i] && !isMetal[z] && !(HB_ACCEPTOR[z] && this.hasH(i)) && this.q[i] < P.NONPOLAR_Q && this.q[i] > -P.NONPOLAR_Q ? 2 : 0;
+    }
+    return h;
+  };
+
   S.computeForces = function () {
     const n = this.n, x = this.x, y = this.y, fx = this.fx, fy = this.fy, el = this.el;
     const q = this.q, nb = this.nb, contacts = this.contacts, ghostT = this.ghostT, used = this.used, ion = this.ion, coh = this.coh;
@@ -1478,6 +1502,7 @@
     const maxCand = this.candI.length;
     const vdwScale = P.VDW_SCALE;
     const molPol = P.MOL_POLARIZABILITY, hbEps = P.HB_EPS * P.KB, hbd = this.hbd;
+    const hydro = this.updateHydrophobic(), hydroF = P.HYDROPHOBIC;
     const self = this;
     const rho = this.rho, fsI = this.fsI, fsJ = this.fsJ, fsD = this.fsD, fsMax = fsI.length;
     rho.fill(0, 0, n);
@@ -1580,6 +1605,7 @@
           const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
           eps = pairEps[p] * vdwScale * (1 + molPol * bi) * (1 + molPol * bj);
           if (coh[i] !== 1 || coh[j] !== 1) eps *= coh[i] === coh[j] ? coh[i] : Math.sqrt(coh[i] * coh[j]);
+          if ((hydro[i] | hydro[j]) === 3) eps *= hydroF; // (water and a non-polar atom: see updateHydrophobic)
         }
         F = -4 * eps * s * (1 - s * s) / w;
         if (s < 0.25 && !(nb[i] && nb[j] && oneFour(i, j))) { contacts[i]++; contacts[j]++; }
@@ -1832,6 +1858,10 @@
       // settling gravity only for material that is clearly packed (passing gas collisions give
       // a small condF that must not pile the vapour up near the floor)
       let cs = (condF[i] - 0.5) * 3.3, gc = P.G_CONDENSED, wet = 0;
+      // a molecule far above its boiling point is a gas even where it is crowded (N2 brushing a
+      // pool's surface, H2 given off under water): it does not feel the settling force, which
+      // dragged gas that touched a liquid down into it
+      if (this.boilT[i] && this.tLoc[i] > P.GAS_ABOVE_BOIL * this.boilT[i]) cs = 0;
       if (cs > 0) {
         let tcx = Math.floor(x[i] / TC), tcy = Math.floor(y[i] / TC);
         tcx = tcx < 0 ? 0 : tcx >= tgw ? tgw - 1 : tcx;
@@ -2440,6 +2470,7 @@
     else {
       const bi = nb[i] > 2 ? 2 : nb[i], bj = nb[j] > 2 ? 2 : nb[j];
       eps = pairEps[p] * P.VDW_SCALE * (1 + P.MOL_POLARIZABILITY * bi) * (1 + P.MOL_POLARIZABILITY * bj);
+      if ((this.hydro[i] | this.hydro[j]) === 3) eps *= P.HYDROPHOBIC;
     }
     const cf = this.coh[i] === this.coh[j] ? this.coh[i] : Math.sqrt(this.coh[i] * this.coh[j]);
     if (!(isMetal[ei] && isMetal[ej] && !nb[i] && !nb[j])) eps *= cf;
@@ -3437,7 +3468,9 @@
       // a covalent network (graphite, silicon, sulfur chains): big and held by bonds, not ions
       const net = mol.length > 12 && !this.hasIonicBond(mol) ? 1 : 0;
       for (let k = 0; k < mol.length; k++) this.netF[mol[k]] = net;
-      let T = 0, c = 1;
+      let T = 0, c = 1, Tb = 0;
+      // (a lone noble-gas atom is a molecule of its own; other lone atoms are metals or radicals)
+      if (mol.length === 1 && E[el[i]].isNoble) Tb = E[el[i]].bp || 0;
       if (mol.length > 1 && mol.length <= 12) {
         const counts = {};
         for (let k = 0; k < mol.length; k++) counts[el[mol[k]]] = (counts[el[mol[k]]] || 0) + 1;
@@ -3450,12 +3483,13 @@
           // element's melting point, which is that of its solid)
           const els = Object.keys(counts);
           const mp = CE.phase.meltingPoint(key) || (els.length === 1 && mol.length === 2 && E[+els[0]].mp) || 0;
-          e = { T: mp, c: (ov && ov[key]) || COHESION[key] || 1 };
+          const d = CE.phase.forKey(key);
+          e = { T: mp, c: (ov && ov[key]) || COHESION[key] || 1, b: (d && (d.Tb || d.Ts)) || 0 };
           cache.set(sig, e);
         }
-        T = e.T; c = e.c;
+        T = e.T; c = e.c; Tb = e.b;
       }
-      for (let k = 0; k < mol.length; k++) meltT[mol[k]] = T;
+      for (let k = 0; k < mol.length; k++) { meltT[mol[k]] = T; this.boilT[mol[k]] = Tb; }
       if (this.coh[i] !== c) {
         // the molecule became another substance (a reaction): its cohesion changes, and the
         // energy that releases or costs is settled as heat
