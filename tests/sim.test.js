@@ -801,6 +801,9 @@ test('hot hydrogen peroxide decomposes to water and oxygen, without O-O-O chains
   const sim = newSim(49);
   sim.addMolecules(H2O2, 300, P.W / 2, P.H - 250, { x: 400, y: 250 });
   sim.plateTemp = 750;
+  // (insulated: peroxide boils at 423 K, so on the hot plate it boils off, and in a jar whose glass
+  // cools it to ~600 K the vapour lasts, as real peroxide vapour does at 600 K)
+  sim.insulated = true;
   run(sim, 15);
   assert.ok(mol(sim, 'H2O') > 0.1 && mol(sim, 'O2') > 0.03, 'water and oxygen: ' + mol(sim, 'H2O').toFixed(3) + ' / ' + mol(sim, 'O2').toFixed(3));
   // (HO3 is a real, short-lived radical, made from ozone; H2O3 and longer chains are not)

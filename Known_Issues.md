@@ -56,7 +56,7 @@ below as soon as it is found, even if it is not fixed.
 | 14 | No NO from hot N₂ + O₂ | Open |
 | 15 | Network solids never warm up | **Fixed**: graphite warms (it reads ~1.5x hot, issue 29); silicon reads low |
 | 16 | Gauge reads vapour that isn't there | **Fixed**; Hg and I₂ remain too volatile |
-| 17 | Liquids don't boil above their boiling point | **Fixed**: a liquid hotter than its boiling point at the jar's pressure (from the real vapour curve) loses cohesion and boils off, taking its latent heat. Insulated water at ~410 K: 21–46% liquid after 20–30 s (was 55–63%); on a 520 K plate 21–27% (was 37–39%). See "Boiling, condensing and the plate" |
+| 17 | Liquids don't boil above their boiling point | **Fixed (partly)**: a liquid hotter than its boiling point at the jar's pressure (from the real vapour curve) loses cohesion and boils off, taking its latent heat. Insulated water on a 400 K plate: ~46–48% liquid after 30 s (was 55–63%), less than hoped (see below); on a 520 K plate 21–27% (was 37–39%). See "Boiling, condensing and the plate" |
 | 18 | The jar runs far below the plate | **Explained / fixed at the cold end**: an insulated jar reaches the plate (3000 K plate: ~3000–3200 K); with the glass losing heat to the 293 K room the gas settles between the two (~2050 K), as a real jar would. On a 70 K plate argon now condenses (58% after 30 s, was 17%): its atoms were bound too weakly |
 | 19 | Condensed matter at impossible temperatures | **Fixed / explained**: no liquid can last above its critical temperature or boiling point now. The liquid nitrogen's own temperature is ~77 K; the 131–141 K reading is the jar's average, mostly the warmer gas over it. Water on a 250 K plate does freeze (62% ice at 15 s, over 80% from 30 s); the old reading counted ice as condensed liquid |
 | 20 | CO₂ polymerises when cold | **Fixed** |
@@ -85,6 +85,7 @@ below as soon as it is found, even if it is not fixed.
 | 43 | After issue 36's fix, a ball of iron dropped into water slammed in: pulled 3.6 times as hard as the water, it plunged at the bulk speed limit (900 units/s), flung the water up the glass and heated its leading face to 380–480 K, where water oxidised iron atoms off it; the ball could tear | **Fixed**: a metal in a liquid sinks no faster than 200 units/s (the liquid's drag; about how fast iron sank in water before): 0.4 mol of iron into water now peaks at ~310 K, with no iron oxidised and a smaller splash than before issue 36's change |
 | 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point; cell readings up to 2900 K) as it hits; lead to ~1150 K. Thrown, it bounces off and keeps most of its motion; held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once | **Fixed**: while the hand holds a solid that touches the glass (or for 4 s after throwing one), each part of it is kept to at most 80% of its melting point, the rest of the heat going into the hand and the glass; once against the glass the hand presses it on at no more than 30 units/s instead of ramming on. Iron now peaks around 900 K, lead 460 K, gold 470 K, and they still heat and dent on impact. See "Pushing a solid into the glass" |
 | 45 | Barium in water still leaves a little BaH₂ and BaH (~0.006 mol from 0.06 mol of barium in 10 s): the hot metal takes up some of the H₂ it gives off faster than water hydrolyses the hydride | Open (found while fixing issue 6) |
+| 46 | Hydrogen peroxide vapour decomposes far too slowly: 0.3 mol at 850 K in an insulated jar is still ~90% H₂O₂ after 12 s (real: gone in well under a second; at 600 K real vapour lasts hours, which the model gets right). Liquid peroxide on a hot plate decomposes quickly, but since issue 17's fix it boils off first (as real dilute peroxide would), so the hot-peroxide test now runs in an insulated jar | Open (found while fixing issue 17) |
 
 ### Root causes found during the fix pass
 
@@ -541,12 +542,13 @@ Issues 17–19 were measured together (0.5–1 mol, 30 s):
 
 | | Before | After |
 | --- | --- | --- |
-| Water, insulated jar, 400 K plate (liquid at ~405–430 K) | 55–63% liquid, 0.22–0.34 atm | 21–46% liquid, 0.4–1.0 atm, still boiling off |
+| Water, insulated jar, 400 K plate | 55–63% liquid, 0.22–0.34 atm | 46–48% liquid, ~0.3–0.4 atm (real: all vapour, 2 atm) |
 | Water on a 520 K plate (the test) | 37–39% liquid | 21–27% |
-| Steam on cold glass (450 K plate) | 60% liquid, 0.36 atm | ~45–55%, boiling and condensing on the glass |
+| Steam on cold glass (450 K plate) | 60% liquid, 0.36 atm | ~51%, boiling and condensing on the glass |
 | Argon on a 70 K plate | 17% condensed | 58% |
-| Nitrogen on a 60 K plate | 57% condensed | 60–64% |
+| Nitrogen on a 60 K plate | 57% condensed | 58% |
 | Water at 300 K, no air | 72–74% liquid (the test) | 71–73% |
+| H₂O₂ on a 750 K plate (the test), 15 s | 0.17 mol water, 0.06 O₂ | 0.11 water, 0.03 O₂: it boils off and its vapour decomposes too slowly (issue 46) |
 
 - **Vapour pressure.** The flat model's liquids evaporate too little as they heat: water's vapour
   pressure was 0.08 atm at 335 K (real 0.16), 0.22 at 380 K (real 1.0), 0.67 at 470 K (real 8.8),
@@ -569,6 +571,12 @@ Issues 17–19 were measured together (0.5–1 mol, 30 s):
 - **Argon** held together too weakly (0.12 atm and a quarter condensed in an insulated jar at
   72 K, real 0.07–0.11 atm); lone argon atoms now get twice the cohesion (krypton and xenon already
   matched).
+- **Why the insulated pool still lingers.** In the insulated 400 K jar the liquid sits at
+  ~355–370 K, cooled by its own evaporation, and the vapour over it reads only ~0.3–0.4 atm
+  where real water would build 2.4 atm and be all vapour: about half of what counts as liquid
+  is droplets in the gas, clusters of molecules that boiled off part-loosened and met again.
+  Letting droplets boil as well (a looser test for 'in a liquid') changed this by only a few
+  percent while costing the 300 K water test and nitrogen's condensing, so it was left out.
 - **The plate.** An insulated jar reaches the plate's temperature; otherwise the glass loses heat
   to the room and the gas settles in between, as in a real jar. Stronger plate coupling for liquids
   (5x) was tried and changed little.
@@ -793,20 +801,30 @@ What remains for mercury, iodine and iron is real free vapour in the model: thos
 are too volatile (see the README on metal cohesion).
 
 ### 17. Liquids don't boil above their boiling point — High (README)
-**Status: Open.** The *Steam on cold glass* preset is still nearly all liquid after 30 s on a
-450 K plate. Sulfuric acid and bromine were not re-checked.
+**Status: Fixed (partly).** The *Steam on cold glass* preset was still nearly all liquid after
+30 s on a 450 K plate. A liquid more than 3% above its boiling point at the jar's pressure (from
+the real vapour curve) now loses cohesion and boils off, taking its latent heat from the plate:
+the preset is ~51% liquid at 30 s (was 60%), water on the test's 520 K plate 21–27% (was 37–39%).
+An insulated pool on a 400 K plate still lingers (46–48% liquid; real water would all be vapour).
+See "Boiling, condensing and the plate". Sulfuric acid and bromine were not re-checked.
 
 ### 18. The jar runs far below the plate — Medium
-**Status: Open.**
-- **Hot end:** a 3000 K plate holds an N₂/O₂ jar at ~2050 K.
-- **Cold end:** 60–70 K plates hold the jar at 100–140 K, so argon never liquefies on the 70 K
-  plate (the noble-gas preset asks you to try this).
+**Status: Explained; cold end fixed.**
+- **Hot end:** a 3000 K plate holds an N₂/O₂ jar at ~2050 K. An insulated jar reaches the plate
+  (~3000–3200 K): the gap is the glass losing heat to the 293 K room, as a real jar's would.
+- **Cold end:** 60–70 K plates held the jar at 100–140 K, so argon never liquefied on the 70 K
+  plate (the noble-gas preset asks you to try this). Argon's atoms held together too weakly; with
+  twice the cohesion it is 58% condensed after 30 s (was 17%). The jar's reading stays above the
+  plate because it averages in the gas.
 
 ### 19. Condensed matter at impossible temperatures — Medium
-**Status: Open.**
-- **Liquid nitrogen preset:** N₂ is reported as condensed while the jar reads 131–141 K,
-  above nitrogen's 126 K critical temperature.
-- **Water:** stays mostly liquid with the jar at 250–260 K for 30 s.
+**Status: Fixed / explained.**
+- **Liquid nitrogen preset:** N₂ was reported as condensed while the jar read 131–141 K, above
+  nitrogen's 126 K critical temperature. The liquid's own temperature is ~77 K; the reading is
+  the jar's average, mostly the warmer gas over it. No liquid can now last above its critical
+  temperature, or above its boiling point.
+- **Water:** stayed "mostly liquid" with the jar at 250–260 K for 30 s. It does freeze (62% ice at
+  15 s, over 80% from 30 s); the old reading counted ice as condensed.
 
 ### 20. CO₂ polymerises when cold — High
 **Status: Fixed.** The polymer came from the overlap flash on adding the molecules. Dry ice now

@@ -294,8 +294,13 @@ electronegativity, covalent radius, common valences, melting and boiling points)
   taking its latent heat from the plate. Below the boiling point the model's own evaporation
   stands: water at room temperature is about 75% liquid in its own vapour (real ~90%). Boiling
   happens at the surface, not in bubbles, and the surface cools as it evaporates, so a pool boils
-  away over tens of seconds rather than at once. Argon's atoms get twice the cohesion so that it
-  condenses near its real boiling point.
+  away over tens of seconds rather than at once. In a closed hot jar the vapour builds only a
+  fraction of its real pressure (water over a 400 K plate in an insulated jar: ~0.35 atm, real
+  2.4) and about half the water stays as liquid and droplets where real water would all be
+  vapour. Argon's atoms get twice the cohesion so that it condenses near its real boiling point.
+- Some gas-phase reactions run far too slowly: hydrogen peroxide vapour at 850 K is still mostly
+  H₂O₂ after 12 s (real: well under a second), so peroxide that boils off a hot plate into a jar
+  whose glass cools it lingers instead of decomposing.
 - Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
   (spark) → HCl, H₂ + F₂ exploding without a spark, Na + Cl₂ → solid NaCl, metals burning to
   their oxides (MgO, Al₂O₃, iron's Fe₂O₃ and Fe₃O₄, CuO), iron in hot steam releasing hydrogen,
