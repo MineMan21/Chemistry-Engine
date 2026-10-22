@@ -3524,7 +3524,7 @@
         // (in a real liquid or solid: not a pair of molecules meeting in the gas, which counted as
         // condensed for a moment and faded hot N2 that then bounced off the cold plate)
         const cnd = this.cellCnd ? this.cellCnd[this.cellOfT[i]] : 0;
-        if (cf > 0.5 * mol.length && cnd >= (P.BOIL_PACKED !== undefined ? P.BOIL_PACKED : P.SETTLE_MIN + P.SETTLE_RANGE)) {
+        if (cf > 0.5 * mol.length && cnd >= P.SETTLE_MIN + P.SETTLE_RANGE) {
           const Tm = Math.min(Tc, Ts) / mol.length, Tbp = this.boilingPoint(d);
           const x = (Tm - Tbp * (1 + P.BOIL_MARGIN)) / (P.BOIL_RANGE * Tbp);
           const ft = 1 - (1 - P.BOIL_COH) * (x <= 0 ? 0 : x >= 1 ? 1 : x);
