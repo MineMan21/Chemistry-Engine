@@ -56,7 +56,7 @@ below as soon as it is found, even if it is not fixed.
 | 14 | No NO from hot N₂ + O₂ | Open |
 | 15 | Network solids never warm up | **Fixed**: graphite warms (it reads ~1.5x hot, issue 29); silicon reads low |
 | 16 | Gauge reads vapour that isn't there | **Fixed**; Hg and I₂ remain too volatile |
-| 17 | Liquids don't boil above their boiling point | **Fixed (partly)**: a liquid hotter than its boiling point at the jar's pressure (from the real vapour curve) loses cohesion and boils off, taking its latent heat. Insulated water on a 400 K plate: ~46–48% liquid after 30 s (was 55–63%), less than hoped (see below); on a 520 K plate 21–27% (was 37–39%). See "Boiling, condensing and the plate" |
+| 17 | Liquids don't boil above their boiling point | **Fixed (partly)**: a liquid hotter than its boiling point at the jar's pressure (from the real vapour curve) loses cohesion and boils off, taking its latent heat. On the test's 520 K plate water is 25–28% liquid (was 37–39%); an insulated pool on a 400 K plate barely changed (~54% liquid after 30 s, was 55–63%; see below). See "Boiling, condensing and the plate" |
 | 18 | The jar runs far below the plate | **Explained / fixed at the cold end**: an insulated jar reaches the plate (3000 K plate: ~3000–3200 K); with the glass losing heat to the 293 K room the gas settles between the two (~2050 K), as a real jar would. On a 70 K plate argon now condenses (58% after 30 s, was 17%): its atoms were bound too weakly |
 | 19 | Condensed matter at impossible temperatures | **Fixed / explained**: no liquid can last above its critical temperature or boiling point now. The liquid nitrogen's own temperature is ~77 K; the 131–141 K reading is the jar's average, mostly the warmer gas over it. Water on a 250 K plate does freeze (62% ice at 15 s, over 80% from 30 s); the old reading counted ice as condensed liquid |
 | 20 | CO₂ polymerises when cold | **Fixed** |
@@ -542,12 +542,12 @@ Issues 17–19 were measured together (0.5–1 mol, 30 s):
 
 | | Before | After |
 | --- | --- | --- |
-| Water, insulated jar, 400 K plate | 55–63% liquid, 0.22–0.34 atm | 46–48% liquid, ~0.3–0.4 atm (real: all vapour, 2 atm) |
-| Water on a 520 K plate (the test) | 37–39% liquid | 21–27% |
+| Water, insulated jar, 400 K plate | 55–63% liquid, 0.22–0.34 atm | ~54% liquid, ~0.35 atm (real: all vapour, 2.4 atm) |
+| Water on a 520 K plate (the test) | 37–39% liquid | 25–28% |
 | Steam on cold glass (450 K plate) | 60% liquid, 0.36 atm | ~51%, boiling and condensing on the glass |
 | Argon on a 70 K plate | 17% condensed | 58% |
 | Nitrogen on a 60 K plate | 57% condensed | 58% |
-| Water at 300 K, no air | 72–74% liquid (the test) | 71–73% |
+| Water at 300 K, no air | 72–74% liquid (the test) | 74–75% |
 | H₂O₂ on a 750 K plate (the test), 15 s | 0.17 mol water, 0.06 O₂ | 0.11 water, 0.03 O₂: it boils off and its vapour decomposes too slowly (issue 46) |
 
 - **Vapour pressure.** The flat model's liquids evaporate too little as they heat: water's vapour
@@ -566,8 +566,10 @@ Issues 17–19 were measured together (0.5–1 mol, 30 s):
   liquid (so it takes a region holding packed matter); vapour below its boiling point in the gas
   gets its cohesion back (water boiling into an empty jar overshot), but not at a liquid's surface,
   which evaporation cools below the boiling point (that stopped boiling water boiling); and
-  boiling points are taken at 0.04 atm or more (below that the model's own evaporation fills the
-  jar).
+  boiling points are taken at 0.2 atm or more (below that the model's own evaporation fills the
+  jar: at 0.04 atm, benzene, whose real vapour pressure at room temperature is 0.1 atm, boiled
+  through and through in a jar with no air, loosened, and mixed into the water it should float
+  on; a 0.04 atm floor left the insulated pool at 46–48% liquid instead of ~54%).
 - **Argon** held together too weakly (0.12 atm and a quarter condensed in an insulated jar at
   72 K, real 0.07–0.11 atm); lone argon atoms now get twice the cohesion (krypton and xenon already
   matched).
@@ -804,8 +806,8 @@ are too volatile (see the README on metal cohesion).
 **Status: Fixed (partly).** The *Steam on cold glass* preset was still nearly all liquid after
 30 s on a 450 K plate. A liquid more than 3% above its boiling point at the jar's pressure (from
 the real vapour curve) now loses cohesion and boils off, taking its latent heat from the plate:
-the preset is ~51% liquid at 30 s (was 60%), water on the test's 520 K plate 21–27% (was 37–39%).
-An insulated pool on a 400 K plate still lingers (46–48% liquid; real water would all be vapour).
+the preset is ~51% liquid at 30 s (was 60%), water on the test's 520 K plate 25–28% (was 37–39%).
+An insulated pool on a 400 K plate still lingers (~54% liquid; real water would all be vapour).
 See "Boiling, condensing and the plate". Sulfuric acid and bromine were not re-checked.
 
 ### 18. The jar runs far below the plate — Medium

@@ -138,8 +138,8 @@
     // as the model packs it (water: 0.0229 for 1.00 g/cm3; sulfuric acid comes out 52, 1:3 acid
     // and water 59): sets how much a metal immersed in a liquid sinks (see metalSink)
     BOIL_COH: 0.3, BOIL_RANGE: 0.05, BOIL_STEP: 0.1, // boiling: see updateMeltPoints
-    BOIL_MARGIN: 0.03,
-    BOIL_P_MIN: 0.04, // atm: the least pressure boiling points are taken at (see boilingPoint) // ...from this far above the boiling point (a liquid alone with its own vapour sits at it)
+    BOIL_MARGIN: 0.03, // fading starts this far above the boiling point (a liquid alone with its own vapour sits at it)
+    BOIL_P_MIN: 0.2, // atm: the least pressure boiling points are taken at (see boilingPoint)
     GAS_ABOVE_BOIL: 2, // ...and above this multiple of its boiling point a molecule never settles
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
@@ -3558,7 +3558,10 @@
   // Boiling point of substance d at the jar's pressure (cached per substance and pressure step)
   S.boilingPoint = function (d) {
     // (below BOIL_P_MIN the model's own evaporation is left to fill the jar: boiling a liquid into
-    // an empty jar overshot its vapour pressure, the loosened vapour lingering)
+    // an empty jar overshot its vapour pressure, the loosened vapour lingering; and at 0.04 atm
+    // benzene, whose vapour pressure is 0.1 atm at room temperature, boiled through and through
+    // in a jar with no air and mixed into water, where a real one would only evaporate until its
+    // vapour had built up)
     const Pj = Math.max(this.pressureAtm, P.BOIL_P_MIN), step = Math.round(Math.log(Pj) * 50);
     const cache = this._bpCache || (this._bpCache = new Map()), k = d.key + step;
     let T = cache.get(k);
