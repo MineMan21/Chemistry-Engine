@@ -169,6 +169,29 @@
   }
 
   // Data for a species key (or null when no documented diagram exists).
+  // Boiling point at pressure P (atm): where the condensed phase's vapour pressure reaches P, on
+  // the vapour curve or, below the triple point, the sublimation curve; at or above the critical
+  // pressure, the critical temperature. (Inverse of vaporP / sublimationP.)
+  function boilingT(d, P) {
+    if (d.helium || !(P > 0)) return d.helium ? d.Tc : 0;
+    if (P >= d.Pc) return d.Tc;
+    const lnP = Math.log(P);
+    if (P >= d.Pt) {
+      const a = vapAnchors(d);
+      for (let k = 0; k < a.length - 1; k++) {
+        const [T0, P0] = a[k], [T1, P1] = a[k + 1];
+        if (P <= P1 || k === a.length - 2) {
+          const f = (lnP - Math.log(P0)) / (Math.log(P1) - Math.log(P0));
+          return 1 / (1 / T0 + f * (1 / T1 - 1 / T0));
+        }
+      }
+    }
+    if (d.Ts) {
+      const b = Math.log(d.Pt) / (1 / d.Tt - 1 / d.Ts);
+      return 1 / (1 / d.Tt + (lnP - Math.log(d.Pt)) / b);
+    }
+    return 1 / (1 / d.Tt - (lnP - Math.log(d.Pt)) * R / d.hs);
+  }
   function forKey(key) { return DATA[key] || null; }
   function forElement(z) {
     const e = CE.elements[z];
@@ -182,5 +205,5 @@
   }
 
   CE.phase = { DATA: DATA, forKey: forKey, forElement: forElement, phaseAt: phaseAt, diagram: diagram,
-    vaporP: vaporP, sublimationP: sublimationP, meltT: meltT, meltingPoint: meltingPoint };
+    vaporP: vaporP, sublimationP: sublimationP, boilingT: boilingT, meltT: meltT, meltingPoint: meltingPoint };
 })(typeof window !== 'undefined' ? (window.CE = window.CE || {}) : (globalThis.CE = globalThis.CE || {}));

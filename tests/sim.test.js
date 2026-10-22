@@ -1084,6 +1084,23 @@ test('oil and water come apart (benzene rises to the top); ethanol and water sta
   assert.ok(etoh.share < 0.5, 'ethanol beside other ethanol: ' + etoh.share.toFixed(2));
 });
 
+test('boiling points follow the real vapour curve; argon condenses on a 70 K plate', function () {
+  const ph = CE.phase;
+  assert.ok(Math.abs(ph.boilingT(ph.forKey('H2O'), 1) - 373.1) < 0.5, 'water at 1 atm');
+  assert.ok(Math.abs(ph.boilingT(ph.forKey('H2O'), 8.8) - 450) < 2, 'water at 8.8 atm');
+  assert.ok(Math.abs(ph.boilingT(ph.forKey('N2'), 1) - 77.4) < 0.5, 'nitrogen at 1 atm');
+  assert.strictEqual(ph.boilingT(ph.forKey('N2'), 50), ph.forKey('N2').Tc, 'above the critical pressure');
+  // the noble-gas preset asks you to try this: 0.5 mol of argon on a 70 K plate (it boils at
+  // 87 K; the glass is at room temperature). It used to stay ~83% gas.
+  const sim = newSim(1);
+  sim.plateTemp = 70;
+  sim.tCell.fill(70);
+  sim.addMoles(Z('Ar'), 0.5, P.W / 2, P.H / 2);
+  run(sim, 20);
+  const ar = sim.analyze().find(function (s) { return s.key === 'Ar'; });
+  assert.ok(ar.condensed / ar.molecules > 0.35, 'argon condensed: ' + (ar.condensed / ar.molecules).toFixed(2));
+});
+
 test('removing particles keeps bonds consistent', function () {
   const sim = newSim(9);
   sim.addMoles(Z('O'), 0.1, P.W / 2, P.H / 2);

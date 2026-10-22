@@ -56,9 +56,9 @@ below as soon as it is found, even if it is not fixed.
 | 14 | No NO from hot N₂ + O₂ | Open |
 | 15 | Network solids never warm up | **Fixed**: graphite warms (it reads ~1.5x hot, issue 29); silicon reads low |
 | 16 | Gauge reads vapour that isn't there | **Fixed**; Hg and I₂ remain too volatile |
-| 17 | Liquids don't boil above their boiling point | Open |
-| 18 | The jar runs far below the plate | Open |
-| 19 | Condensed matter at impossible temperatures | Open |
+| 17 | Liquids don't boil above their boiling point | **Fixed**: a liquid hotter than its boiling point at the jar's pressure (from the real vapour curve) loses cohesion and boils off, taking its latent heat. Insulated water at ~410 K: 21–46% liquid after 20–30 s (was 55–63%); on a 520 K plate 21–27% (was 37–39%). See "Boiling, condensing and the plate" |
+| 18 | The jar runs far below the plate | **Explained / fixed at the cold end**: an insulated jar reaches the plate (3000 K plate: ~3000–3200 K); with the glass losing heat to the 293 K room the gas settles between the two (~2050 K), as a real jar would. On a 70 K plate argon now condenses (58% after 30 s, was 17%): its atoms were bound too weakly |
+| 19 | Condensed matter at impossible temperatures | **Fixed / explained**: no liquid can last above its critical temperature or boiling point now. The liquid nitrogen's own temperature is ~77 K; the 131–141 K reading is the jar's average, mostly the warmer gas over it. Water on a 250 K plate does freeze (62% ice at 15 s, over 80% from 30 s); the old reading counted ice as condensed liquid |
 | 20 | CO₂ polymerises when cold | **Fixed** |
 | 21 | Sulfur makes the wrong molecules | Open |
 | 22 | A network with a stray atom vanishes from Contents | **Fixed** |
@@ -534,6 +534,44 @@ Issue 42 looked like a missing hydrophobic effect (water pushing non-polar molec
   pool a few nanometres deep) a real bubble could not exist either: its surface tension would
   squeeze it at hundreds of atmospheres. Contents lists such gas as liquid/solid because it is
   surrounded.
+
+### Boiling, condensing and the plate
+
+Issues 17–19 were measured together (0.5–1 mol, 30 s):
+
+| | Before | After |
+| --- | --- | --- |
+| Water, insulated jar, 400 K plate (liquid at ~405–430 K) | 55–63% liquid, 0.22–0.34 atm | 21–46% liquid, 0.4–1.0 atm, still boiling off |
+| Water on a 520 K plate (the test) | 37–39% liquid | 21–27% |
+| Steam on cold glass (450 K plate) | 60% liquid, 0.36 atm | ~45–55%, boiling and condensing on the glass |
+| Argon on a 70 K plate | 17% condensed | 58% |
+| Nitrogen on a 60 K plate | 57% condensed | 60–64% |
+| Water at 300 K, no air | 72–74% liquid (the test) | 71–73% |
+
+- **Vapour pressure.** The flat model's liquids evaporate too little as they heat: water's vapour
+  pressure was 0.08 atm at 335 K (real 0.16), 0.22 at 380 K (real 1.0), 0.67 at 470 K (real 8.8),
+  and only a few molecules left a second, so a liquid far above its boiling point stayed. Now a
+  molecule in a liquid or solid hotter than its boiling point at the jar's pressure (the real
+  vapour or sublimation curve, from the phase data of ~45 substances; the critical point above
+  the critical pressure) by more than 3% has its cohesion faded, over the next 5% of the boiling
+  point, to 30%, a step every 64 substeps. The energy that takes is settled as heat, so boiling
+  absorbs its latent heat and the plate must supply it. Below the boiling point nothing changes.
+- **Which molecules.** Each step matters: faded in the gas, hot N₂ bounced off the cold plate
+  (so a molecule out in the gas keeps its cohesion, and one that boiled off stays loose); judged by
+  its region's temperature, a thin film on a cold plate read as warm as the gas over it (so a
+  liquid's temperature is the lower of its region's and its own); judged by its own alone, random
+  jiggling boiled room-temperature water; a pair of molecules meeting in the gas counted as
+  liquid (so it takes a region holding packed matter); vapour below its boiling point in the gas
+  gets its cohesion back (water boiling into an empty jar overshot), but not at a liquid's surface,
+  which evaporation cools below the boiling point (that stopped boiling water boiling); and
+  boiling points are taken at 0.04 atm or more (below that the model's own evaporation fills the
+  jar).
+- **Argon** held together too weakly (0.12 atm and a quarter condensed in an insulated jar at
+  72 K, real 0.07–0.11 atm); lone argon atoms now get twice the cohesion (krypton and xenon already
+  matched).
+- **The plate.** An insulated jar reaches the plate's temperature; otherwise the glass loses heat
+  to the room and the gas settles in between, as in a real jar. Stronger plate coupling for liquids
+  (5x) was tried and changed little.
 
 ### Every element dropped
 

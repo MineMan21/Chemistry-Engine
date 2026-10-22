@@ -287,10 +287,15 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 - Metal cohesion is calibrated on the melting point, so metals boil in the right order but
   low-melting metals boil too early (gallium well below its real 2673 K), and a molten metal
   shows more vapour (a few tenths of an atmosphere for iron at 2100 K) than the real one.
-- Evaporation rises too gently with temperature: in an insulated jar a small amount of water is
-  about 80% liquid at 298 K (85% real), but still about two-thirds liquid at 373 K and half at
-  450 K, where real water would be all vapour. Liquids boil over a wide range rather than at a
-  sharp boiling point; a hot plate well above the boiling point drives them off.
+- Evaporation in the flat model rises too gently with temperature (water's vapour pressure is
+  0.2 atm at 380 K, real 1.0), so boiling is added for the ~45 substances with phase data: a
+  liquid or solid more than 3% above its boiling point at the jar's pressure (from the real
+  vapour curve; no liquid at all above the critical point) has its cohesion faded, and boils off,
+  taking its latent heat from the plate. Below the boiling point the model's own evaporation
+  stands: water at room temperature is about 75% liquid in its own vapour (real ~90%). Boiling
+  happens at the surface, not in bubbles, and the surface cools as it evaporates, so a pool boils
+  away over tens of seconds rather than at once. Argon's atoms get twice the cohesion so that it
+  condenses near its real boiling point.
 - Reactions that the test suite checks and that work: the hydrogen flame, H₂ + Cl₂
   (spark) → HCl, H₂ + F₂ exploding without a spark, Na + Cl₂ → solid NaCl, metals burning to
   their oxides (MgO, Al₂O₃, iron's Fe₂O₃ and Fe₃O₄, CuO), iron in hot steam releasing hydrogen,

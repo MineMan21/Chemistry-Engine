@@ -137,6 +137,9 @@
     LIQ_DENSITY: 43.7, // real density (g/cm3) per unit of 2D density (u per unit^2) of a liquid
     // as the model packs it (water: 0.0229 for 1.00 g/cm3; sulfuric acid comes out 52, 1:3 acid
     // and water 59): sets how much a metal immersed in a liquid sinks (see metalSink)
+    BOIL_COH: 0.3, BOIL_RANGE: 0.05, BOIL_STEP: 0.1, // boiling: see updateMeltPoints
+    BOIL_MARGIN: 0.03,
+    BOIL_P_MIN: 0.04, // atm: the least pressure boiling points are taken at (see boilingPoint) // ...from this far above the boiling point (a liquid alone with its own vapour sits at it)
     GAS_ABOVE_BOIL: 2, // ...and above this multiple of its boiling point a molecule never settles
     SETTLE_MIN: 6, // packed atoms a coarse cell needs before settling gravity starts...
     SETTLE_RANGE: 14, // ...and how many more until it is at full strength
@@ -233,6 +236,11 @@
     N2: 1.82, O2: 2.30, F2: 2.77, Cl2: 2.00, Br2: 0.59, I2: 0.71,
     CO2: 1.66, CH4: 1.19, CO: 0.68, ClH: 0.90, H3N: 0.43, C2H6O: 2.17, C6H6: 2.24, H2O2: 0.93
   };
+
+  // ...and for lone noble-gas atoms, calibrated the same way: argon's atoms held together too
+  // weakly to condense on a 70 K plate (0.5 mol in an insulated jar at 72 K: 0.12 atm and a quarter
+  // condensed; with this, 0.08 atm, real 0.07-0.11). Krypton and xenon already match.
+  const NOBLE_COHESION = { Ar: 2 };
 
   const HALOGENS = new Set([9, 17, 35, 53, 85]);
   // metals with an oxide film that dilute acids do not get through (titanium, zirconium, niobium,
@@ -377,6 +385,7 @@
     this.gAcc = new Float32Array(M); // gravity each atom felt in the last substep (units/s^2)
     this.meltT = new Float32Array(M); // melting point of the molecule an atom belongs to (0: unknown)
     this.boilT = new Float32Array(M); // ...and its boiling (or subliming) point at 1 atm (0: unknown)
+    this.boilF = new Float32Array(M).fill(1); // share of its cohesion left as it boils (see updateMeltPoints)
     this.netF = new Uint8Array(M); // 1: part of a covalent network (graphite, silicon, sulfur chains)
     this.arom = new Uint8Array(M); // 1: in an aromatic six-membered ring (benzene)
     this.coh = new Float32Array(M).fill(1); // cohesion factor of the molecule (see COHESION)
@@ -474,7 +483,7 @@
     this.nb[i] = 0; this.used[i] = 0; this.q[i] = 0; this.hbd[i] = 0;
     this.tag[i] = tag || 0; this.born[i] = tag || 0; this.solidF[i] = 2;
     this.anneal[i] = Math.round(P.ANNEAL_STEPS * P.DT_REF / P.DT);
-    this.meltT[i] = 0; this.boilT[i] = 0; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
+    this.meltT[i] = 0; this.boilT[i] = 0; this.boilF[i] = 1; this.netF[i] = 0; this.arom[i] = 0; this.gAcc[i] = 0; this.grainOf[i] = -1; this.coh[i] = 1;
     for (let k = 0; k < P.MAXB; k++) this.bp[i * P.MAXB + k] = -1;
     this.tLoc[i] = T || P.AMBIENT;
     this.tSelf[i] = T || P.AMBIENT;
@@ -1084,7 +1093,7 @@
     this.el[i] = this.el[last]; this.nb[i] = this.nb[last]; this.used[i] = this.used[last];
     this.condF[i] = this.condF[last];
     this.q[i] = this.q[last]; this.tLoc[i] = this.tLoc[last]; this.tSelf[i] = this.tSelf[last]; this.contacts[i] = this.contacts[last];
-    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.born[i] = this.born[last]; this.solidF[i] = this.solidF[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.boilT[i] = this.boilT[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
+    this.hbd[i] = this.hbd[last]; this.tag[i] = this.tag[last]; this.born[i] = this.born[last]; this.solidF[i] = this.solidF[last]; this.anneal[i] = this.anneal[last]; this.meltT[i] = this.meltT[last]; this.boilT[i] = this.boilT[last]; this.boilF[i] = this.boilF[last]; this.netF[i] = this.netF[last]; this.arom[i] = this.arom[last]; this.gAcc[i] = this.gAcc[last];
     this.grainOf[i] = this.grainOf[last];
     if (this.grainOf[last] >= 0) this.crystalRenumber(last, i);
     this.grainOf[last] = -1;
@@ -3468,9 +3477,9 @@
       // a covalent network (graphite, silicon, sulfur chains): big and held by bonds, not ions
       const net = mol.length > 12 && !this.hasIonicBond(mol) ? 1 : 0;
       for (let k = 0; k < mol.length; k++) this.netF[mol[k]] = net;
-      let T = 0, c = 1, Tb = 0;
+      let T = 0, c = 1, Tb = 0, d = null;
       // (a lone noble-gas atom is a molecule of its own; other lone atoms are metals or radicals)
-      if (mol.length === 1 && E[el[i]].isNoble) Tb = E[el[i]].bp || 0;
+      if (mol.length === 1 && E[el[i]].isNoble) { Tb = E[el[i]].bp || 0; d = CE.phase.forKey(E[el[i]].symbol); c = NOBLE_COHESION[E[el[i]].symbol] || 1; }
       if (mol.length > 1 && mol.length <= 12) {
         const counts = {};
         for (let k = 0; k < mol.length; k++) counts[el[mol[k]]] = (counts[el[mol[k]]] || 0) + 1;
@@ -3484,10 +3493,52 @@
           const els = Object.keys(counts);
           const mp = CE.phase.meltingPoint(key) || (els.length === 1 && mol.length === 2 && E[+els[0]].mp) || 0;
           const d = CE.phase.forKey(key);
-          e = { T: mp, c: (ov && ov[key]) || COHESION[key] || 1, b: (d && (d.Tb || d.Ts)) || 0 };
+          e = { T: mp, c: (ov && ov[key]) || COHESION[key] || 1, b: (d && (d.Tb || d.Ts)) || 0, d: d };
           cache.set(sig, e);
         }
-        T = e.T; c = e.c; Tb = e.b;
+        T = e.T; c = e.c; Tb = e.b; d = e.d;
+      }
+      // Boiling. In the flat model a liquid's vapour pressure rises far too slowly with heat (water
+      // at 380 K: 0.2 atm, real 1.0; at 470 K: 0.7 atm, real 9), and it evaporates only a few
+      // molecules a second, so water on a 450 K plate stayed mostly liquid. Above its boiling point
+      // at the jar's pressure (from the real vapour curve; above the critical point there is no
+      // liquid at all), from BOIL_MARGIN above it, a molecule's cohesion fades over BOIL_RANGE of
+      // the boiling point down to BOIL_COH, a step at a time, so that the liquid boils off, taking
+      // its latent heat (the change is settled as heat below, and the plate has to supply it).
+      // Below the boiling point nothing changes. With no other gas in the jar the boiling point
+      // follows the jar's own vapour, so a liquid in an evacuated jar boils until the real vapour
+      // pressure has built up.
+      // (It changes only in a liquid or solid, fading when hot and coming back when cold; in the
+      // gas a molecule keeps what it has: steam that boiled off stays loose instead of sticking
+      // straight back onto the boiling water, and gets its cohesion back once it settles on cold
+      // glass; a gas that never boiled condenses as before. Judged in the gas by the gas's
+      // temperature, N2 bounced off a 60 K plate. A liquid's temperature is the lower of its
+      // region's and its own recent one: a thin film on a cold plate shares its region with the
+      // warmer gas above and read too warm, while one molecule's own reading jiggles too much to
+      // go by alone, and boiled room-temperature water.)
+      let f = 1;
+      if (d && !d.helium) {
+        let cf = 0, Tc = 0, Ts = 0;
+        for (let k = 0; k < mol.length; k++) { cf += this.condF[mol[k]]; Tc += this.tLoc[mol[k]]; Ts += this.tSelf[mol[k]]; }
+        f = this.boilF[i];
+        // (in a real liquid or solid: not a pair of molecules meeting in the gas, which counted as
+        // condensed for a moment and faded hot N2 that then bounced off the cold plate)
+        const cnd = this.cellCnd ? this.cellCnd[this.cellOfT[i]] : 0;
+        if (cf > 0.5 * mol.length && cnd >= (P.BOIL_PACKED !== undefined ? P.BOIL_PACKED : P.SETTLE_MIN + P.SETTLE_RANGE)) {
+          const Tm = Math.min(Tc, Ts) / mol.length, Tbp = this.boilingPoint(d);
+          const x = (Tm - Tbp * (1 + P.BOIL_MARGIN)) / (P.BOIL_RANGE * Tbp);
+          const ft = 1 - (1 - P.BOIL_COH) * (x <= 0 ? 0 : x >= 1 ? 1 : x);
+          const f0 = this.boilF[i];
+          f = f0 + Math.max(-P.BOIL_STEP, Math.min(P.BOIL_STEP, ft - f0));
+        } else if (f < 1 && cf < 0.3 * mol.length && Tc / mol.length < this.boilingPoint(d)) {
+          // (vapour out in the gas below its boiling point, more than the gas can hold, gets its
+          // cohesion back and can condense: water boiling into an empty jar overshot its vapour
+          // pressure. Not at a liquid's surface, which evaporation cools below the boiling point:
+          // that stopped boiling water from boiling)
+          f = Math.min(1, f + P.BOIL_STEP);
+        }
+        for (let k = 0; k < mol.length; k++) this.boilF[mol[k]] = f;
+        c *= f;
       }
       for (let k = 0; k < mol.length; k++) { meltT[mol[k]] = T; this.boilT[mol[k]] = Tb; }
       if (this.coh[i] !== c) {
@@ -3503,6 +3554,17 @@
     }
   };
 
+
+  // Boiling point of substance d at the jar's pressure (cached per substance and pressure step)
+  S.boilingPoint = function (d) {
+    // (below BOIL_P_MIN the model's own evaporation is left to fill the jar: boiling a liquid into
+    // an empty jar overshot its vapour pressure, the loosened vapour lingering)
+    const Pj = Math.max(this.pressureAtm, P.BOIL_P_MIN), step = Math.round(Math.log(Pj) * 50);
+    const cache = this._bpCache || (this._bpCache = new Map()), k = d.key + step;
+    let T = cache.get(k);
+    if (T === undefined) { T = CE.phase.boilingT(d, Math.exp(step / 50)); cache.set(k, T); }
+    return T;
+  };
 
   S.hasIonicBond = function (mol) {
     const MB = P.MAXB;
