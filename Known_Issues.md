@@ -86,6 +86,9 @@ below as soon as it is found, even if it is not fixed.
 | 44 | A lump held by the hand and rammed into the glass at the hand's top speed heats to ~1900 K (iron, past its melting point; cell readings up to 2900 K) as it hits; lead to ~1150 K. Thrown, it bounces off and keeps most of its motion; held, all its motion (the hand gives up to ~1680 K worth per atom) turns to heat at once | **Fixed**: while the hand holds a solid that touches the glass (or for 4 s after throwing one), each part of it is kept to at most 80% of its melting point, the rest of the heat going into the hand and the glass; once against the glass the hand presses it on at no more than 30 units/s instead of ramming on. Iron now peaks around 900 K, lead 460 K, gold 470 K, and they still heat and dent on impact. See "Pushing a solid into the glass" |
 | 45 | Barium in water still leaves a little BaH₂ and BaH (~0.006 mol from 0.06 mol of barium in 10 s): the hot metal takes up some of the H₂ it gives off faster than water hydrolyses the hydride | Open (found while fixing issue 6) |
 | 46 | Hydrogen peroxide vapour decomposes far too slowly: 0.3 mol at 850 K in an insulated jar is still ~90% H₂O₂ after 12 s (real: gone in well under a second; at 600 K real vapour lasts hours, which the model gets right). Liquid peroxide on a hot plate decomposes quickly, but since issue 17's fix it boils off first (as real dilute peroxide would), so the hot-peroxide test now runs in an insulated jar | Open (found while fixing issue 17) |
+| 47 | The real-world view built its picture (splatting, blurring and shading a fine grid) for the whole jar every frame, even when zoomed in or panned so that most of the jar was off screen | **Fixed**: it builds only the part on screen plus the blur's reach. See "Drawing only what is on screen" |
+| 48 | Zoomed far into the atom view, atoms near the screen's edge popped in and out, and a bond between two atoms just off screen could vanish while crossing it: atoms were drawn only within a fixed 60 px of the edge, while a big atom is up to ~250 px across and a bond up to ~560 px long at full zoom | **Fixed**: the margin grows with the zoom |
+| 49 | Between the mole and real-world views (scale 0.19–0.25) both are drawn and cross-faded, the slowest view: ~27 ms a frame with ~8,900 atoms in a 1400×900 window (Chromium, software rendering), most of it the mole view's thousands of half-transparent squares | Open (minor: a short range of zoom, passed through) |
 
 ### Root causes found during the fix pass
 
@@ -582,6 +585,36 @@ Issues 17–19 were measured together (0.5–1 mol, 30 s):
 - **The plate.** An insulated jar reaches the plate's temperature; otherwise the glass loses heat
   to the room and the gas settles in between, as in a real jar. Stronger plate coupling for liquids
   (5x) was tried and changed little.
+
+### Drawing only what is on screen
+
+Asked whether zooming in skips drawing what is not in view. Measured in Chromium (software
+rendering) with ~8,900 atoms in a 1400×900 window:
+
+- **Atom and mole views** already drew only the atoms on screen. Zooming in makes a frame
+  cheaper: the atom view takes 8.3 ms at its widest, 4.9 ms at 2.2×, 2.7 ms at 6× and 1.1 ms
+  fully zoomed in; the mole view 6.8 ms over the whole jar, 2.1 ms looking at a corner. Each frame
+  still looks at every atom once to see whether it is on screen, which is cheap next to drawing.
+  The edge margin was too small at high zoom (issue 48).
+- **The real-world view** built the whole jar each frame (issue 47). It now builds the window on
+  screen plus the blur's reach (about 100 screen px), snapped to whole cells so that a pan moves
+  the eased picture along instead of restarting it. It looks the same: compared pixel by pixel
+  with the old drawing at eight camera positions (whole jar, zoomed in on its middle, floor,
+  corner and right wall, and the mole and atom views), no pixel differs by more than 2/255. The
+  real-view part of a frame, before → after:
+
+  | View | 1400×900 | 400×800 (phone) |
+  | --- | --- | --- |
+  | Whole jar (fit) | ~5.5 ms, unchanged (the same work: CPU profiles match function by function) | ~2–3 ms, unchanged |
+  | Zoomed in on the floor of the jar | 12.3 → 8.0 ms | 10.0 → 4.6 ms |
+  | Zoomed in on the top corner | 10.7 → 7.9 ms | 10.1 → 3.0 ms |
+
+- **The simulation is not culled**: every atom keeps moving and reacting wherever the camera
+  is. Drawing less leaves more of each frame for it (the main loop gives physics what drawing
+  leaves over), so a zoomed-in view runs the jar faster.
+- Seen while measuring: between the mole and real-world views (scale 0.19–0.25) both are drawn
+  and cross-faded, which made it the slowest view (~27 ms a frame here). It is a short range of
+  zoom, passed through rather than stayed in, so it was left (issue 49).
 
 ### Every element dropped
 

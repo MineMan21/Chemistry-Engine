@@ -323,13 +323,40 @@
   R.drawReal = function (ctx, alpha, dt) {
     const sim = this.sim, n = sim.n, W = P.W, H = P.H;
     const cw = Math.max(6, 2.6 / this.cam.scale); // grid cell in world units (~2.6 screen px)
-    const gw = Math.ceil(W / cw), gh = Math.ceil(H / cw), N = gw * gh;
     // gas is a soft haze: drawn from a grid GF times coarser, scaled up underneath the rest
-    const GF = 4, cg4 = cw * GF, ggw = Math.ceil(W / cg4), ggh = Math.ceil(H / cg4), GN = ggw * ggh;
-    if (!this._rg || this._rg.N !== N) {
-      const mk = function (k, len) { const a = []; for (let q = 0; q < k; q++) a.push(new Float32Array(len)); return a; };
-      this._rg = { N: N, ch: mk(7, N), prev: mk(7, N), gch: mk(4, GN), gprev: mk(4, GN), fresh: true,
-        tmp: new Float32Array(N), gtmp: new Float32Array(GN) };
+    const GF = 4, cg4 = cw * GF;
+    const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(1, Math.round(160 / cg4));
+    // Only the part of the jar on screen is built (zoomed in or panned, the rest is skipped), plus
+    // a margin as wide as the blur reaches, so the picture at the screen's edge is the same as if
+    // the whole jar were built. The window starts on a whole gas cell, so the fine and the gas
+    // grids line up and a pan moves both by whole cells; it ends at the glass where the jar does
+    // (as the whole-jar grid did: run on past it, the blur thinned liquid lying on the floor).
+    const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.width, this.height);
+    const pad = Math.max(2 * R0 + 2, (2 * RG + 2) * GF) * cw;
+    const wx0 = Math.max(0, Math.floor((tl[0] - pad) / cg4)) * cg4, wy0 = Math.max(0, Math.floor((tl[1] - pad) / cg4)) * cg4;
+    const wx1 = Math.min(W, br[0] + pad), wy1 = Math.min(H, br[1] + pad);
+    if (wx1 <= wx0 || wy1 <= wy0) { this._rg = null; return; } // the jar is off screen
+    const gw = Math.ceil((wx1 - wx0) / cw), gh = Math.ceil((wy1 - wy0) / cw), N = gw * gh;
+    const ggw = Math.ceil((wx1 - wx0) / cg4), ggh = Math.ceil((wy1 - wy0) / cg4), GN = ggw * ggh;
+    const mk = function (k, len) { const a = []; for (let q = 0; q < k; q++) a.push(new Float32Array(len)); return a; };
+    let rg = this._rg;
+    if (!rg || rg.cw !== cw) {
+      // a new zoom level starts afresh
+      rg = this._rg = { cw: cw, gw: gw, gh: gh, ggw: ggw, ggh: ggh, x0: wx0, y0: wy0, ch: mk(7, N), prev: mk(7, N),
+        gch: mk(4, GN), gprev: mk(4, GN), fresh: true, tmp: new Float32Array(N), gtmp: new Float32Array(GN) };
+      this.realCanvas = null;
+    } else if (rg.x0 !== wx0 || rg.y0 !== wy0 || rg.gw !== gw || rg.gh !== gh) {
+      // a pan keeps the eased picture, moved with the window (newly uncovered cells start empty,
+      // in the margin off screen)
+      const dx = Math.round((wx0 - rg.x0) / cw), dy = Math.round((wy0 - rg.y0) / cw);
+      const gdx = Math.round((wx0 - rg.x0) / cg4), gdy = Math.round((wy0 - rg.y0) / cg4);
+      const prev = mk(7, N), gprev = mk(4, GN);
+      for (let k = 0; k < 7; k++) remapGrid(rg.prev[k], rg.gw, rg.gh, prev[k], gw, gh, dx, dy);
+      for (let k = 0; k < 4; k++) remapGrid(rg.gprev[k], rg.ggw, rg.ggh, gprev[k], ggw, ggh, gdx, gdy);
+      if (rg.gw !== gw || rg.gh !== gh) { rg.ch = mk(7, N); rg.gch = mk(4, GN); rg.tmp = new Float32Array(N); rg.gtmp = new Float32Array(GN); this.realCanvas = null; }
+      Object.assign(rg, { gw: gw, gh: gh, ggw: ggw, ggh: ggh, x0: wx0, y0: wy0, prev: prev, gprev: gprev });
+    }
+    if (!this.realCanvas) {
       this.realCanvas = document.createElement('canvas');
       this.realCanvas.width = gw; this.realCanvas.height = gh;
       this.realCtx = this.realCanvas.getContext('2d');
@@ -340,7 +367,7 @@
       this.gasImg = this.gasCtx.createImageData(ggw, ggh);
     }
     // channels: density, colour (3), opacity, solid, heat; gas: strength, colour (3)
-    const ch = this._rg.ch, gch = this._rg.gch;
+    const ch = rg.ch, gch = rg.gch;
     for (let k = 0; k < 7; k++) ch[k].fill(0);
     for (let k = 0; k < 4; k++) gch[k].fill(0);
     const [dens, cr, cg, cb, cop, csol, heat] = ch;
@@ -349,14 +376,19 @@
     const species = sim.species || [], spIdx = sim.spIdx, x = sim.x, y = sim.y, el = sim.el;
     const area = 1 / (cw * cw);
     const condF = sim.condF;
+    // (atoms off the window are skipped; at the glass, as before, an atom right at it is drawn in
+    // the edge cell)
+    const sx0 = wx0 > 0 ? wx0 : -Infinity, sy0 = wy0 > 0 ? wy0 : -Infinity;
+    const sx1 = wx1 < W ? wx1 : Infinity, sy1 = wy1 < H ? wy1 : Infinity;
     let anyCond = false, anyGas = false;
     for (let i = 0; i < n; i++) {
+      if (x[i] < sx0 || x[i] >= sx1 || y[i] < sy0 || y[i] >= sy1) continue; // off screen
       const sp = spIdx ? species[spIdx[i]] : null;
       const look = sp && sp.look;
       if (!look) continue;
       // bilinear splat over the four nearest cells, so an atom moving across a cell boundary
       // fades across instead of jumping
-      let fx = x[i] / cw - 0.5, fy = y[i] / cw - 0.5;
+      let fx = (x[i] - wx0) / cw - 0.5, fy = (y[i] - wy0) / cw - 0.5;
       fx = fx < 0 ? 0 : fx > gw - 1.001 ? gw - 1.001 : fx;
       fy = fy < 0 ? 0 : fy > gh - 1.001 ? gh - 1.001 : fy;
       const gx = Math.floor(fx), gy = Math.floor(fy), tx = fx - gx, ty = fy - gy;
@@ -387,7 +419,7 @@
       if (wg > 0) {
         // (on the coarse grid each cell holds GF^2 fine cells' worth: per fine cell, as above)
         anyGas = true;
-        let qx = x[i] / cg4 - 0.5, qy = y[i] / cg4 - 0.5;
+        let qx = (x[i] - wx0) / cg4 - 0.5, qy = (y[i] - wy0) / cg4 - 0.5;
         qx = qx < 0 ? 0 : qx > ggw - 1.001 ? ggw - 1.001 : qx;
         qy = qy < 0 ? 0 : qy > ggh - 1.001 ? ggh - 1.001 : qy;
         const hx = Math.floor(qx), hy = Math.floor(qy), ux = qx - hx, uy = qy - hy, c4 = hy * ggw + hx, g0 = wg / (GF * GF);
@@ -401,13 +433,12 @@
     }
     // blur about one atom diameter, so packed atoms (metals sit ~36 units apart) read as one piece
     // (a picture with no liquid, solid or gas in it skips that blur: it is all zero)
-    const R0 = Math.max(1, Math.round(30 / cw)), RG = Math.max(1, Math.round(160 / cg4));
-    if (anyCond) for (let k = 0; k < 7; k++) { boxBlur(ch[k], gw, gh, R0, this._rg.tmp); boxBlur(ch[k], gw, gh, R0, this._rg.tmp); }
-    if (anyGas) for (let k = 0; k < 4; k++) { boxBlur(gch[k], ggw, ggh, RG, this._rg.gtmp); boxBlur(gch[k], ggw, ggh, RG, this._rg.gtmp); }
+    if (anyCond) for (let k = 0; k < 7; k++) { boxBlur(ch[k], gw, gh, R0, rg.tmp); boxBlur(ch[k], gw, gh, R0, rg.tmp); }
+    if (anyGas) for (let k = 0; k < 4; k++) { boxBlur(gch[k], ggw, ggh, RG, rg.gtmp); boxBlur(gch[k], ggw, ggh, RG, rg.gtmp); }
     // ease toward this frame's picture (time constant ~0.12 s)
-    const prev = this._rg.prev, gprev = this._rg.gprev;
-    const ease = this._rg.fresh ? 1 : 1 - Math.exp(-(dt || 0.016) / 0.12);
-    this._rg.fresh = false;
+    const prev = rg.prev, gprev = rg.gprev;
+    const ease = rg.fresh ? 1 : 1 - Math.exp(-(dt || 0.016) / 0.12);
+    rg.fresh = false;
     for (let k = 0; k < 7; k++) {
       const a = ch[k], b = prev[k];
       for (let c = 0; c < N; c++) { b[c] += ease * (a[c] - b[c]); a[c] = b[c]; }
@@ -465,8 +496,10 @@
     ctx.globalAlpha = alpha;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    if (anyGas) ctx.drawImage(this.gasCanvas, 0, 0, ggw * cg4, ggh * cg4);
-    ctx.drawImage(this.realCanvas, 0, 0, gw * cw, gh * cw);
+    // (clipped to the jar: the window's last cells can reach past the glass)
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    if (anyGas) ctx.drawImage(this.gasCanvas, wx0, wy0, ggw * cg4, ggh * cg4);
+    ctx.drawImage(this.realCanvas, wx0, wy0, gw * cw, gh * cw);
     // glass reflections
     const glare = ctx.createLinearGradient(0, 0, W, 0);
     glare.addColorStop(0, 'rgba(255,255,255,0.10)');
@@ -594,6 +627,18 @@
     return t * t * (3 - 2 * t);
   }
 
+  // Copies grid src (sw x sh) into dst (dw x dh) moved by (dx, dy) cells: dst cell (i, j) takes
+  // src cell (i + dx, j + dy), or 0 where that is outside src.
+  function remapGrid(src, sw, sh, dst, dw, dh, dx, dy) {
+    dst.fill(0);
+    const i0 = Math.max(0, -dx), i1 = Math.min(dw, sw - dx);
+    if (i1 <= i0) return;
+    for (let j = Math.max(0, -dy), j1 = Math.min(dh, sh - dy); j < j1; j++) {
+      const s = (j + dy) * sw + dx;
+      dst.set(src.subarray(s + i0, s + i1), j * dw + i0);
+    }
+  }
+
   // In-place separable box blur (running sums), radius r cells. The vertical pass keeps one
   // running sum per column and goes row by row, so it reads and writes memory in order.
   let colSum = new Float32Array(0);
@@ -636,9 +681,12 @@
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#ffeb3b';
     ctx.beginPath();
+    const vw = this.width + d, vh = this.height + d;
     for (let i = 0; i < n; i++) {
       if (!focus[i]) continue;
-      ctx.rect(sim.x[i] * s + ox - d / 2, sim.y[i] * s + oy - d / 2, d, d);
+      const px = sim.x[i] * s + ox, py = sim.y[i] * s + oy;
+      if (px < -d || py < -d || px > vw || py > vh) continue; // off screen
+      ctx.rect(px - d / 2, py - d / 2, d, d);
     }
     ctx.fill();
     ctx.restore();
@@ -649,13 +697,20 @@
     const s = this.cam.scale;
     const ox = this.width / 2 - this.cam.x * s, oy = this.height / 2 - this.cam.y * s;
     const x = sim.x, y = sim.y, el = sim.el;
-    const margin = 60;
+    // Only atoms on screen are drawn: 2 = on screen (within the biggest atom's radius, with its
+    // label and highlight ring, of the edge), 1 = off screen but near enough for a bond to it to
+    // cross the screen (bonds longer than 40 units are not drawn), 0 = neither. (A fixed margin of
+    // 60 px let big atoms and long bonds pop in and out at the edge when zoomed far in.)
+    const margin = Math.max(60, 26 * 0.42 * s * 1.6), reach = margin + 40 * s;
     const visible = this._visible && this._visible.length >= n ? this._visible : (this._visible = new Uint8Array(P.MAX));
     const sx = this._sx && this._sx.length >= n ? this._sx : (this._sx = new Float32Array(P.MAX));
     const sy = this._sy && this._sy.length >= n ? this._sy : (this._sy = new Float32Array(P.MAX));
+    const vw = this.width, vh = this.height;
     for (let i = 0; i < n; i++) {
-      sx[i] = x[i] * s + ox; sy[i] = y[i] * s + oy;
-      visible[i] = (sx[i] > -margin && sy[i] > -margin && sx[i] < this.width + margin && sy[i] < this.height + margin) ? 1 : 0;
+      const a = x[i] * s + ox, b = y[i] * s + oy;
+      sx[i] = a; sy[i] = b;
+      visible[i] = a > -margin && b > -margin && a < vw + margin && b < vh + margin ? 2
+        : a > -reach && b > -reach && a < vw + reach && b < vh + reach ? 1 : 0;
     }
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -667,7 +722,8 @@
       if (!visible[i]) continue;
       for (let k = 0; k < sim.nb[i]; k++) {
         const j = sim.bp[i * MB + k];
-        if (j < i && visible[j]) continue;
+        if (j < i && visible[j]) continue; // drawn from j
+        if (visible[i] < 2 && visible[j] < 2 && !crossesView(sx[i], sy[i], sx[j], sy[j], vw, vh)) continue;
         const order = sim.bo[i * MB + k], ionic = sim.bc[i * MB + k] === 2;
         const dx = sx[j] - sx[i], dy = sy[j] - sy[i];
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -693,7 +749,7 @@
     const hl = this.highlight;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (let i = 0; i < n; i++) {
-      if (!visible[i]) continue;
+      if (visible[i] < 2) continue;
       const z = el[i];
       const r = E[z].radius * 0.42 * s;
       ctx.globalAlpha = focus && !focus[i] ? 0.15 : 1;
@@ -724,6 +780,12 @@
     }
     ctx.restore();
   };
+
+  // Whether the segment (ax, ay)-(bx, by) passes over the w x h screen (its bounding box does:
+  // close enough for a bond, a short segment)
+  function crossesView(ax, ay, bx, by, w, h) {
+    return Math.max(ax, bx) > 0 && Math.min(ax, bx) < w && Math.max(ay, by) > 0 && Math.min(ay, by) < h;
+  }
 
   function hasIonic(sim, i) {
     for (let k = 0; k < sim.nb[i]; k++) if (sim.bc[i * P.MAXB + k] === 2) return true;
