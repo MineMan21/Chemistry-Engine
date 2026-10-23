@@ -358,7 +358,7 @@ electronegativity, covalent radius, common valences, melting and boiling points)
 | `js/sim.js` | The particle simulation: forces, constraints, reactions, thermostats, pump and can |
 | `js/phase.js` | Triple/critical points and normal melting/boiling points for documented substances, and the phase-boundary curves built from them |
 | `js/phasechart.js` | The phase diagram chart (SVG) and its table of key values |
-| `js/render.js` | Canvas drawing of the apparatus, atom view and pixel bulk view |
+| `js/render.js` | Canvas drawing of the apparatus and the atom, mole (pixel) and real-world views. Each view draws only what is on screen (zoomed in, the rest of the jar costs next to nothing to draw); the simulation still moves and reacts every atom |
 | `js/ui.js` | Periodic table, element card, contents list and inspector |
 | `js/main.js` | Input handling, controls, presets and the main loop |
 | `tests/` | Headless tests (`npm test`) |
